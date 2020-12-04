@@ -24,6 +24,7 @@ import (
 	"github.com/gardener/gardener/pkg/client/kubernetes"
 	"github.com/gardener/gardener/pkg/controllerutils"
 	"github.com/gardener/gardener/pkg/gardenlet/controller/federatedseed/networkpolicy/helper"
+	"github.com/gardener/gardener/pkg/gardenlet/controller/federatedseed/networkpolicy/hostnameresolver"
 
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
@@ -41,26 +42,20 @@ import (
 // Controller watching the endpoints resource "kubernetes" of the Seeds's kube-apiserver in the default namespace
 // to keep the NetworkPolicy "allow-to-seed-apiserver" in sync.
 type Controller struct {
-	ctx      context.Context
-	log      *logrus.Entry
-	recorder record.EventRecorder
-
-	seedClient client.Client
-
-	namespaceReconciler reconcile.Reconciler
-
-	endpointsInformer cache.SharedInformer
-
+	ctx                     context.Context
+	log                     *logrus.Entry
+	recorder                record.EventRecorder
+	seedClient              client.Client
+	namespaceReconciler     reconcile.Reconciler
+	endpointsInformer       cache.SharedInformer
 	networkPoliciesInformer runtimecache.Informer
-
-	namespaceQueue    workqueue.RateLimitingInterface
-	namespaceInformer runtimecache.Informer
-
-	shootNamespaceSelector labels.Selector
-
-	workerCh               chan int
-	numberOfRunningWorkers int
-	waitGroup              sync.WaitGroup
+	namespaceQueue          workqueue.RateLimitingInterface
+	namespaceInformer       runtimecache.Informer
+	hostnameProvider        hostnameresolver.Provider
+	shootNamespaceSelector  labels.Selector
+	workerCh                chan int
+	numberOfRunningWorkers  int
+	waitGroup               sync.WaitGroup
 }
 
 // NewController instantiates a new controller.
@@ -74,35 +69,47 @@ func NewController(ctx context.Context, seedClient kubernetes.Interface, seedDef
 		return nil, err
 	}
 
+	provider, err := hostnameresolver.CreateForCluster(seedClient, seedLogger)
+	if err != nil {
+		return nil, err
+	}
+
 	var (
 		endpointsInformer = seedDefaultNamespaceKubeInformer.Core().V1().Endpoints()
 		namespaceQueue    = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "namespace")
 	)
 
 	shootNamespaceSelector := labels.SelectorFromSet(labels.Set{
-		v1beta1constants.DeprecatedGardenRole: v1beta1constants.GardenRoleShoot,
-		v1beta1constants.GardenRole:           v1beta1constants.GardenRoleShoot})
+		v1beta1constants.GardenRole: v1beta1constants.GardenRoleShoot,
+	})
 
 	controller := &Controller{
-		ctx:                 ctx,
-		log:                 seedLogger,
-		namespaceReconciler: newNamespaceReconciler(ctx, seedLogger, seedClient.Client(), endpointsInformer.Lister(), seedName, shootNamespaceSelector),
-		recorder:            recorder,
-
-		seedClient: seedClient.Client(),
-
+		ctx: ctx,
+		log: seedLogger,
+		namespaceReconciler: newNamespaceReconciler(
+			ctx,
+			seedLogger,
+			seedClient.Client(),
+			endpointsInformer.Lister(),
+			seedName,
+			shootNamespaceSelector,
+			provider,
+		),
+		recorder:                recorder,
+		seedClient:              seedClient.Client(),
 		endpointsInformer:       endpointsInformer.Informer(),
 		namespaceInformer:       namespaceInformer,
 		networkPoliciesInformer: networkPoliciesInformer,
 		namespaceQueue:          namespaceQueue,
-
-		shootNamespaceSelector: shootNamespaceSelector,
-
-		workerCh: make(chan int),
+		shootNamespaceSelector:  shootNamespaceSelector,
+		workerCh:                make(chan int),
+		hostnameProvider:        provider,
 	}
 
 	// start informer & sync caches
 	seedDefaultNamespaceKubeInformer.Start(ctx.Done())
+
+	go controller.hostnameProvider.Start(ctx)
 
 	return controller, nil
 }
@@ -112,9 +119,19 @@ func (c *Controller) Run(ctx context.Context, workers int) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Minute*2)
 	defer cancel()
 
-	if !cache.WaitForCacheSync(timeoutCtx.Done(), c.endpointsInformer.HasSynced, c.namespaceInformer.HasSynced, c.networkPoliciesInformer.HasSynced) {
-		return fmt.Errorf("timeout waiting for endpoints informers to sync")
+	if !cache.WaitForCacheSync(
+		timeoutCtx.Done(),
+		c.endpointsInformer.HasSynced,
+		c.namespaceInformer.HasSynced,
+		c.networkPoliciesInformer.HasSynced,
+		c.hostnameProvider.HasSynced,
+	) {
+		return fmt.Errorf("timeout waiting for informers to sync")
 	}
+
+	c.hostnameProvider.WithCallback(func() {
+		c.enqueueNamespaces()
+	})
 
 	c.endpointsInformer.AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: func(obj interface{}) bool {
@@ -161,6 +178,7 @@ func (c *Controller) Run(ctx context.Context, workers int) error {
 	}
 
 	c.log.Info("Seed API server network policy controller initialized.")
+
 	return nil
 }
 

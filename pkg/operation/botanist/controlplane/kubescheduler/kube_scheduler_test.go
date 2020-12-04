@@ -143,6 +143,7 @@ var _ = Describe("KubeScheduler", func() {
 					Labels: map[string]string{
 						"app":                     "kubernetes",
 						"role":                    "scheduler",
+						"gardener.cloud/role":     "controlplane",
 						"garden.sapcloud.io/role": "controlplane",
 					},
 				},
@@ -294,8 +295,8 @@ subjects:
 			},
 			Type: corev1.SecretTypeOpaque,
 			Data: map[string][]byte{
-				"clusterrolebinding.yaml": []byte(clusterRoleBindingYAML),
-				"rolebinding.yaml":        []byte(roleBindingYAML),
+				"clusterrolebinding____system_controller_kube-scheduler.yaml":                 []byte(clusterRoleBindingYAML),
+				"rolebinding__kube-system__system_controller_kube-scheduler_auth-reader.yaml": []byte(roleBindingYAML),
 			},
 		}
 		managedResource = &resourcesv1alpha1.ManagedResource{
@@ -350,7 +351,7 @@ subjects:
 				Expect(kubeScheduler.Deploy(ctx)).To(MatchError(fakeErr))
 			})
 
-			It("should fail because the service cannot be created", func() {
+			It("should fail when the service cannot be created", func() {
 				gomock.InOrder(
 					c.EXPECT().Get(ctx, kutil.Key(namespace, configMapName), gomock.AssignableToTypeOf(&corev1.ConfigMap{})),
 					c.EXPECT().Update(ctx, gomock.AssignableToTypeOf(&corev1.ConfigMap{})),

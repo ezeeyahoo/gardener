@@ -38,6 +38,7 @@ import (
 	cr "github.com/gardener/gardener/pkg/chartrenderer"
 	"github.com/gardener/gardener/pkg/client/kubernetes"
 	fakeclientset "github.com/gardener/gardener/pkg/client/kubernetes/fake"
+	"github.com/gardener/gardener/pkg/gardenlet/apis/config"
 	gardenletfeatures "github.com/gardener/gardener/pkg/gardenlet/features"
 	"github.com/gardener/gardener/pkg/logger"
 	"github.com/gardener/gardener/pkg/operation"
@@ -58,12 +59,21 @@ var _ = Describe("dns", func() {
 		seedClient, gardenClient client.Client
 		s                        *runtime.Scheme
 		ctx                      context.Context
+
+		dnsEntryTTL int64 = 1234
 	)
 
 	BeforeEach(func() {
 		ctx = context.TODO()
 		b = &Botanist{
 			Operation: &operation.Operation{
+				Config: &config.GardenletConfiguration{
+					Controllers: &config.GardenletControllerConfiguration{
+						Shoot: &config.ShootControllerConfiguration{
+							DNSEntryTTLSeconds: &dnsEntryTTL,
+						},
+					},
+				},
 				Shoot: &shoot.Shoot{
 					Info: &v1beta1.Shoot{
 						ObjectMeta: metav1.ObjectMeta{Namespace: shootNS},
@@ -129,7 +139,6 @@ var _ = Describe("dns", func() {
 				},
 			}
 			Expect(found).To(DeepDerivativeEqual(expected))
-
 		})
 		It("should delete when calling Deploy and dns is disabled", func() {
 			b.Shoot.DisableDNS = true
@@ -184,7 +193,6 @@ var _ = Describe("dns", func() {
 				},
 			}
 			Expect(found).To(DeepDerivativeEqual(expected))
-
 		})
 		It("should delete when calling Deploy and dns is disabled", func() {
 			b.Shoot.DisableDNS = true
@@ -557,6 +565,56 @@ var _ = Describe("dns", func() {
 			b.Shoot.ExternalDomain = &garden.Domain{Provider: "valid-provider"}
 
 			Expect(b.APIServerSNIEnabled()).To(BeTrue())
+		})
+	})
+
+	Context("APIServerSNIPodMutatorEnabled", func() {
+		BeforeEach(func() {
+			gardenletfeatures.RegisterFeatureGates()
+		})
+
+		It("returns false when the feature gate is disabled", func() {
+			Expect(gardenletfeatures.FeatureGate.Set("APIServerSNI=false")).ToNot(HaveOccurred())
+
+			Expect(b.APIServerSNIPodMutatorEnabled()).To(BeFalse())
+		})
+
+		Context("APIServerSNI feature gate is enabled", func() {
+			BeforeEach(func() {
+				Expect(gardenletfeatures.FeatureGate.Set("APIServerSNI=true")).ToNot(HaveOccurred())
+				b.Garden.InternalDomain = &garden.Domain{Provider: "some-provider"}
+				b.Shoot.Info.Spec.DNS = &v1beta1.DNS{Domain: pointer.StringPtr("foo")}
+				b.Shoot.ExternalClusterDomain = pointer.StringPtr("baz")
+				b.Shoot.ExternalDomain = &garden.Domain{Provider: "valid-provider"}
+			})
+
+			It("returns true when Shoot annotations are nil", func() {
+				b.Shoot.Info.Annotations = nil
+
+				Expect(b.APIServerSNIPodMutatorEnabled()).To(BeTrue())
+			})
+
+			It("returns true when Shoot annotations does not have the annotation", func() {
+				b.Shoot.Info.Annotations = map[string]string{"foo": "bar"}
+
+				Expect(b.APIServerSNIPodMutatorEnabled()).To(BeTrue())
+			})
+
+			It("returns true when Shoot annotations exist, but it's not a 'disable", func() {
+				b.Shoot.Info.Annotations = map[string]string{
+					"alpha.featuregates.shoot.gardener.cloud/apiserver-sni-pod-injector": "not-disable",
+				}
+
+				Expect(b.APIServerSNIPodMutatorEnabled()).To(BeTrue())
+			})
+
+			It("returns false when Shoot annotations exist and it's a disable", func() {
+				b.Shoot.Info.Annotations = map[string]string{
+					"alpha.featuregates.shoot.gardener.cloud/apiserver-sni-pod-injector": "disable",
+				}
+
+				Expect(b.APIServerSNIPodMutatorEnabled()).To(BeFalse())
+			})
 		})
 	})
 })

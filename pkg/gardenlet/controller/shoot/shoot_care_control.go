@@ -38,6 +38,7 @@ import (
 	"github.com/gardener/gardener/pkg/logger"
 	"github.com/gardener/gardener/pkg/operation"
 	botanistpkg "github.com/gardener/gardener/pkg/operation/botanist"
+	shootpkg "github.com/gardener/gardener/pkg/operation/shoot"
 	"github.com/gardener/gardener/pkg/utils"
 	"github.com/gardener/gardener/pkg/utils/flow"
 	"github.com/gardener/gardener/pkg/utils/imagevector"
@@ -64,6 +65,36 @@ func (c *Controller) shootCareAdd(obj interface{}) {
 
 	// don't add random duration for enqueueing new Shoots, that have never been health checked
 	c.shootCareQueue.Add(key)
+}
+
+func (c *Controller) shootCareUpdate(oldObj, newObj interface{}) {
+	key, err := cache.MetaNamespaceKeyFunc(newObj)
+	if err != nil {
+		return
+	}
+
+	oldShoot, ok := oldObj.(*gardencorev1beta1.Shoot)
+	if !ok {
+		return
+	}
+	newShoot, ok := newObj.(*gardencorev1beta1.Shoot)
+	if !ok {
+		return
+	}
+
+	// re-evaluate shoot health status right after a reconciliation operation has finished
+	if shootReconciliationFinishedSuccessful(oldShoot, newShoot) {
+		c.shootCareQueue.Add(key)
+	}
+}
+
+func shootReconciliationFinishedSuccessful(oldShoot, newShoot *gardencorev1beta1.Shoot) bool {
+	return oldShoot.Status.LastOperation != nil &&
+		oldShoot.Status.LastOperation.Type != gardencorev1beta1.LastOperationTypeDelete &&
+		oldShoot.Status.LastOperation.State == gardencorev1beta1.LastOperationStateProcessing &&
+		newShoot.Status.LastOperation != nil &&
+		newShoot.Status.LastOperation.Type != gardencorev1beta1.LastOperationTypeDelete &&
+		newShoot.Status.LastOperation.State == gardencorev1beta1.LastOperationStateSucceeded
 }
 
 func (c *Controller) reconcileShootCareKey(key string) error {
@@ -208,9 +239,11 @@ func (c *defaultCareControl) Care(shootObj *gardencorev1beta1.Shoot, key string)
 
 		seedConditions []gardencorev1beta1.Condition
 
-		constraintHibernationPossible = gardencorev1beta1helper.GetOrInitCondition(shoot.Status.Constraints, gardencorev1beta1.ShootHibernationPossible)
-		oldConstraints                = []gardencorev1beta1.Condition{
+		constraintHibernationPossible               = gardencorev1beta1helper.GetOrInitCondition(shoot.Status.Constraints, gardencorev1beta1.ShootHibernationPossible)
+		constraintMaintenancePreconditionsSatisfied = gardencorev1beta1helper.GetOrInitCondition(shoot.Status.Constraints, gardencorev1beta1.ShootMaintenancePreconditionsSatisfied)
+		oldConstraints                              = []gardencorev1beta1.Condition{
 			constraintHibernationPossible,
+			constraintMaintenancePreconditionsSatisfied,
 		}
 	)
 
@@ -231,8 +264,10 @@ func (c *defaultCareControl) Care(shootObj *gardencorev1beta1.Shoot, key string)
 		}
 
 		constraintHibernationPossible = gardencorev1beta1helper.UpdatedConditionUnknownErrorMessage(constraintHibernationPossible, message)
+		constraintMaintenancePreconditionsSatisfied = gardencorev1beta1helper.UpdatedConditionUnknownErrorMessage(constraintMaintenancePreconditionsSatisfied, message)
 		constraints := []gardencorev1beta1.Condition{
 			constraintHibernationPossible,
+			constraintMaintenancePreconditionsSatisfied,
 		}
 
 		if !gardencorev1beta1helper.ConditionsNeedUpdate(oldConditions, conditions) &&
@@ -254,6 +289,7 @@ func (c *defaultCareControl) Care(shootObj *gardencorev1beta1.Shoot, key string)
 				initializeShootClients,
 				c.conditionThresholdsToProgressingMapping(),
 				c.config.Controllers.ShootCare.StaleExtensionHealthCheckThreshold,
+				botanist.Shoot.GardenerVersion,
 				conditionAPIServerAvailable,
 				conditionControlPlaneHealthy,
 				conditionEveryNodeReady,
@@ -271,7 +307,12 @@ func (c *defaultCareControl) Care(shootObj *gardencorev1beta1.Shoot, key string)
 		},
 		// Trigger constraint checks
 		func(ctx context.Context) error {
-			constraintHibernationPossible = botanist.ConstraintsChecks(ctx, initializeShootClients, constraintHibernationPossible)
+			constraintHibernationPossible, constraintMaintenancePreconditionsSatisfied = botanist.ConstraintsChecks(
+				ctx,
+				initializeShootClients,
+				constraintHibernationPossible,
+				constraintMaintenancePreconditionsSatisfied,
+			)
 			return nil
 		},
 		// Trigger garbage collection
@@ -291,6 +332,7 @@ func (c *defaultCareControl) Care(shootObj *gardencorev1beta1.Shoot, key string)
 		}, seedConditions...)
 		constraints = []gardencorev1beta1.Condition{
 			constraintHibernationPossible,
+			constraintMaintenancePreconditionsSatisfied,
 		}
 	)
 
@@ -311,8 +353,8 @@ func (c *defaultCareControl) Care(shootObj *gardencorev1beta1.Shoot, key string)
 		gardenClient.GardenCore(),
 		retry.DefaultBackoff,
 		shoot.ObjectMeta,
-		StatusLabelTransform(
-			ComputeStatus(
+		shootpkg.StatusLabelTransform(
+			shootpkg.ComputeStatus(
 				shoot.Status.LastOperation,
 				shoot.Status.LastErrors,
 				conditionAPIServerAvailable,

@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -165,7 +166,8 @@ func (b *Builder) Build(ctx context.Context, c client.Client) (*Shoot, error) {
 		Extensions: &Extensions{
 			DNS: &DNS{},
 		},
-		ControlPlane: &ControlPlane{},
+		ControlPlane:     &ControlPlane{},
+		SystemComponents: &SystemComponents{},
 	}
 
 	extensions, err := calculateExtensions(c, shootObject, shoot.SeedNamespace)
@@ -182,12 +184,18 @@ func (b *Builder) Build(ctx context.Context, c client.Client) (*Shoot, error) {
 	shoot.ExternalDomain = externalDomain
 
 	// Store the Kubernetes version in the format <major>.<minor> on the Shoot object.
-	v, err := semver.NewVersion(shootObject.Spec.Kubernetes.Version)
+	kubernetesVersion, err := semver.NewVersion(shootObject.Spec.Kubernetes.Version)
 	if err != nil {
 		return nil, err
 	}
-	shoot.KubernetesMajorMinorVersion = fmt.Sprintf("%d.%d", v.Major(), v.Minor())
-	shoot.KubernetesVersion = v
+	shoot.KubernetesMajorMinorVersion = fmt.Sprintf("%d.%d", kubernetesVersion.Major(), kubernetesVersion.Minor())
+	shoot.KubernetesVersion = kubernetesVersion
+
+	gardenerVersion, err := semver.NewVersion(shootObject.Status.Gardener.Version)
+	if err != nil {
+		return nil, err
+	}
+	shoot.GardenerVersion = gardenerVersion
 
 	kubernetesVersionGeq118, err := versionutils.CheckVersionMeetsConstraint(shoot.KubernetesMajorMinorVersion, ">= 1.18")
 	if err != nil {
@@ -195,6 +203,9 @@ func (b *Builder) Build(ctx context.Context, c client.Client) (*Shoot, error) {
 	}
 
 	shoot.KonnectivityTunnelEnabled = gardenletfeatures.FeatureGate.Enabled(features.KonnectivityTunnel) && kubernetesVersionGeq118
+	if konnectivityTunnelEnabled, err := strconv.ParseBool(shoot.Info.Annotations[v1beta1constants.AnnotationShootKonnectivityTunnel]); err == nil && kubernetesVersionGeq118 {
+		shoot.KonnectivityTunnelEnabled = konnectivityTunnelEnabled
+	}
 
 	needsClusterAutoscaler, err := gardencorev1beta1helper.ShootWantsClusterAutoscaler(shootObject)
 	if err != nil {

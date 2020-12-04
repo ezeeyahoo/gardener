@@ -44,7 +44,7 @@ import (
 // credentials are computed which will be used to secure the Ingress resources and the kube-apiserver itself.
 // Server certificates for the exposed monitoring endpoints (via Ingress) are generated as well.
 func (b *Botanist) GenerateAndSaveSecrets(ctx context.Context) error {
-	gardenerResourceDataList := gardencorev1alpha1helper.GardenerResourceDataList(b.ShootState.Spec.Gardener)
+	gardenerResourceDataList := gardencorev1alpha1helper.GardenerResourceDataList(b.ShootState.Spec.Gardener).DeepCopy()
 
 	if val, ok := common.GetShootOperationAnnotation(b.Shoot.Info.Annotations); ok && val == common.ShootOperationRotateKubeconfigCredentials {
 		if err := b.rotateKubeconfigSecrets(ctx, &gardenerResourceDataList); err != nil {
@@ -282,6 +282,7 @@ const (
 	secretSuffixKubeConfig = "kubeconfig"
 	secretSuffixSSHKeyPair = v1beta1constants.SecretNameSSHKeyPair
 	secretSuffixMonitoring = "monitoring"
+	secretSuffixLogging    = "logging" // deprecated, used only to delete unused secrets
 )
 
 func computeProjectSecretName(shootName, suffix string) string {
@@ -349,6 +350,19 @@ func (b *Botanist) SyncShootCredentialsToGarden(ctx context.Context) error {
 		})
 	}
 
+	// Clean Kibana credentials that are not used since https://github.com/gardener/gardener/pull/2515
+	// TOOD, remove in future version.
+	fns = append(fns, func(ctx context.Context) error {
+		secretObj := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      computeProjectSecretName(b.Shoot.Info.Name, secretSuffixLogging),
+				Namespace: b.Shoot.Info.Namespace,
+			},
+		}
+
+		return client.IgnoreNotFound(b.K8sGardenClient.Client().Delete(ctx, secretObj, &client.DeleteOptions{}))
+	})
+
 	return flow.Parallel(fns...)(ctx)
 }
 
@@ -361,14 +375,4 @@ func (b *Botanist) cleanupTunnelSecrets(ctx context.Context, gardenerResourceDat
 		gardenerResourceDataList.Delete(secret)
 	}
 	return nil
-}
-
-func dnsNamesForEtcd(namespace string) []string {
-	names := []string{
-		fmt.Sprintf("%s-local", v1beta1constants.ETCDMain),
-		fmt.Sprintf("%s-local", v1beta1constants.ETCDEvents),
-	}
-	names = append(names, kutil.DNSNamesForService(fmt.Sprintf("%s-client", v1beta1constants.ETCDMain), namespace)...)
-	names = append(names, kutil.DNSNamesForService(fmt.Sprintf("%s-client", v1beta1constants.ETCDEvents), namespace)...)
-	return names
 }

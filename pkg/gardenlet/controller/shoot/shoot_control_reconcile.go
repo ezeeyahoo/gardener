@@ -41,6 +41,7 @@ import (
 func (c *Controller) runReconcileShootFlow(o *operation.Operation) *gardencorev1beta1helper.WrappedLastErrors {
 	// We create the botanists (which will do the actual work).
 	var (
+		ctx                  = context.TODO()
 		botanist             *botanistpkg.Botanist
 		enableEtcdEncryption bool
 		tasksWithErrors      []string
@@ -57,12 +58,12 @@ func (c *Controller) runReconcileShootFlow(o *operation.Operation) *gardencorev1
 
 	err = errors.HandleErrors(errorContext,
 		func(errorID string) error {
-			o.CleanShootTaskError(context.TODO(), errorID)
+			o.CleanShootTaskErrorAndUpdateStatusLabel(ctx, errorID)
 			return nil
 		},
 		nil,
 		errors.ToExecute("Create botanist", func() error {
-			return retryutils.UntilTimeout(context.TODO(), 10*time.Second, 10*time.Minute, func(context.Context) (done bool, err error) {
+			return retryutils.UntilTimeout(ctx, 10*time.Second, 10*time.Minute, func(context.Context) (done bool, err error) {
 				botanist, err = botanistpkg.New(o)
 				if err != nil {
 					return retryutils.MinorError(err)
@@ -71,7 +72,7 @@ func (c *Controller) runReconcileShootFlow(o *operation.Operation) *gardencorev1
 			})
 		}),
 		errors.ToExecute("Check required extensions", func() error {
-			return botanist.WaitUntilRequiredExtensionsReady(context.TODO())
+			return botanist.WaitUntilRequiredExtensionsReady(ctx)
 		}),
 		errors.ToExecute("Check version constraint", func() error {
 			enableEtcdEncryption, err = versionutils.CheckVersionMeetsConstraint(botanist.Shoot.Info.Spec.Kubernetes.Version, ">= 1.13")
@@ -101,7 +102,7 @@ func (c *Controller) runReconcileShootFlow(o *operation.Operation) *gardencorev1
 		})
 		deployNamespace = g.Add(flow.Task{
 			Name: "Deploying Shoot namespace in Seed",
-			Fn:   flow.TaskFn(botanist.DeployNamespace).RetryUntilTimeout(defaultInterval, defaultTimeout),
+			Fn:   flow.TaskFn(botanist.DeploySeedNamespace).RetryUntilTimeout(defaultInterval, defaultTimeout),
 		})
 		deploySeedLogging = g.Add(flow.Task{
 			Name:         "Deploying shoot logging stack in Seed",
@@ -199,12 +200,12 @@ func (c *Controller) runReconcileShootFlow(o *operation.Operation) *gardencorev1
 		})
 		deployETCD = g.Add(flow.Task{
 			Name:         "Deploying main and events etcd",
-			Fn:           flow.TaskFn(botanist.DeployETCD).RetryUntilTimeout(defaultInterval, defaultTimeout),
+			Fn:           flow.TaskFn(botanist.DeployEtcd).RetryUntilTimeout(defaultInterval, defaultTimeout),
 			Dependencies: flow.NewTaskIDs(deploySecrets, deployCloudProviderSecret, wailtUntilBackupEntryInGardenReconciled),
 		})
 		waitUntilEtcdReady = g.Add(flow.Task{
 			Name:         "Waiting until main and event etcd report readiness",
-			Fn:           flow.TaskFn(botanist.WaitUntilEtcdReady).SkipIf(o.Shoot.HibernationEnabled),
+			Fn:           flow.TaskFn(botanist.WaitUntilEtcdsReady).SkipIf(o.Shoot.HibernationEnabled),
 			Dependencies: flow.NewTaskIDs(deployETCD),
 		})
 		deployControlPlane = g.Add(flow.Task{
@@ -214,7 +215,7 @@ func (c *Controller) runReconcileShootFlow(o *operation.Operation) *gardencorev1
 		})
 		waitUntilControlPlaneReady = g.Add(flow.Task{
 			Name:         "Waiting until shoot control plane has been reconciled",
-			Fn:           flow.TaskFn(botanist.WaitUntilControlPlaneReady),
+			Fn:           botanist.Shoot.Components.Extensions.ControlPlane.Wait,
 			Dependencies: flow.NewTaskIDs(deployControlPlane),
 		})
 		generateEncryptionConfigurationMetaData = g.Add(flow.Task{
@@ -262,17 +263,17 @@ func (c *Controller) runReconcileShootFlow(o *operation.Operation) *gardencorev1
 		})
 		waitUntilControlPlaneExposureReady = g.Add(flow.Task{
 			Name:         "Waiting until Shoot control plane exposure has been reconciled",
-			Fn:           flow.TaskFn(botanist.WaitUntilControlPlaneExposureReady).SkipIf(useSNI),
+			Fn:           flow.TaskFn(botanist.Shoot.Components.Extensions.ControlPlaneExposure.Wait).SkipIf(useSNI),
 			Dependencies: flow.NewTaskIDs(deployControlPlaneExposure),
 		})
 		destroyControlPlaneExposure = g.Add(flow.Task{
 			Name:         "Destroying shoot control plane exposure",
-			Fn:           flow.TaskFn(botanist.DestroyControlPlaneExposure).DoIf(useSNI),
+			Fn:           flow.TaskFn(botanist.Shoot.Components.Extensions.ControlPlaneExposure.Destroy).DoIf(useSNI),
 			Dependencies: flow.NewTaskIDs(waitUntilKubeAPIServerIsReady),
 		})
 		waitUntilControlPlaneExposureDeleted = g.Add(flow.Task{
 			Name:         "Waiting until shoot control plane exposure has been destroyed",
-			Fn:           flow.TaskFn(botanist.WaitUntilControlPlaneExposureDeleted).DoIf(useSNI),
+			Fn:           flow.TaskFn(botanist.Shoot.Components.Extensions.ControlPlaneExposure.WaitCleanup).DoIf(useSNI),
 			Dependencies: flow.NewTaskIDs(destroyControlPlaneExposure),
 		})
 		initializeShootClients = g.Add(flow.Task{
@@ -320,6 +321,16 @@ func (c *Controller) runReconcileShootFlow(o *operation.Operation) *gardencorev1
 			Fn:           botanist.Shoot.Components.Extensions.Network.Wait,
 			Dependencies: flow.NewTaskIDs(deployNetwork),
 		})
+		_ = g.Add(flow.Task{
+			Name:         "Deploying shoot namespaces system component",
+			Fn:           flow.TaskFn(botanist.Shoot.Components.SystemComponents.Namespaces.Deploy).RetryUntilTimeout(defaultInterval, defaultTimeout).SkipIf(o.Shoot.HibernationEnabled),
+			Dependencies: flow.NewTaskIDs(deployGardenerResourceManager, ensureShootClusterIdentity, computeShootOSConfig),
+		})
+		_ = g.Add(flow.Task{
+			Name:         "Deploying metrics-server system component",
+			Fn:           flow.TaskFn(botanist.DeployMetricsServer).RetryUntilTimeout(defaultInterval, defaultTimeout).SkipIf(o.Shoot.HibernationEnabled),
+			Dependencies: flow.NewTaskIDs(deployGardenerResourceManager, ensureShootClusterIdentity, computeShootOSConfig),
+		})
 		deployManagedResources = g.Add(flow.Task{
 			Name:         "Deploying managed resources",
 			Fn:           flow.TaskFn(botanist.DeployManagedResources).RetryUntilTimeout(defaultInterval, defaultTimeout).SkipIf(o.Shoot.HibernationEnabled),
@@ -345,10 +356,15 @@ func (c *Controller) runReconcileShootFlow(o *operation.Operation) *gardencorev1
 			Fn:           flow.TaskFn(botanist.EnsureIngressDNSRecord),
 			Dependencies: flow.NewTaskIDs(nginxLBReady),
 		})
+		vpnLBReady = g.Add(flow.Task{
+			Name:         "Waiting until vpn-shoot LoadBalancer is ready",
+			Fn:           flow.TaskFn(botanist.WaitUntilVpnShootServiceIsReady).SkipIf(o.Shoot.HibernationEnabled || o.Shoot.KonnectivityTunnelEnabled),
+			Dependencies: flow.NewTaskIDs(deployManagedResources, waitUntilNetworkIsReady, waitUntilWorkerReady),
+		})
 		waitUntilTunnelConnectionExists = g.Add(flow.Task{
 			Name:         "Waiting until the Kubernetes API server can connect to the Shoot workers",
 			Fn:           flow.TaskFn(botanist.WaitUntilTunnelConnectionExists).SkipIf(o.Shoot.HibernationEnabled),
-			Dependencies: flow.NewTaskIDs(deployManagedResources, waitUntilNetworkIsReady, waitUntilWorkerReady),
+			Dependencies: flow.NewTaskIDs(deployManagedResources, waitUntilNetworkIsReady, waitUntilWorkerReady, vpnLBReady),
 		})
 		_ = g.Add(flow.Task{
 			Name: "Finishing Kubernetes API server service SNI transition",
@@ -443,15 +459,10 @@ func (c *Controller) runReconcileShootFlow(o *operation.Operation) *gardencorev1
 			}).DoIf(requestControlPlanePodsRestart),
 			Dependencies: flow.NewTaskIDs(deployKubeControllerManager, deployControlPlane, deployControlPlaneExposure),
 		})
-		deployVPA = g.Add(flow.Task{
+		_ = g.Add(flow.Task{
 			Name:         "Deploying Kubernetes vertical pod autoscaler",
 			Fn:           flow.TaskFn(botanist.DeployVerticalPodAutoscaler).RetryUntilTimeout(defaultInterval, defaultTimeout),
 			Dependencies: flow.NewTaskIDs(deploySecrets, waitUntilKubeAPIServerIsReady, deployManagedResources, hibernateControlPlane),
-		})
-		_ = g.Add(flow.Task{
-			Name:         "Maintain shoot annotations",
-			Fn:           flow.TaskFn(botanist.MaintainShootAnnotations),
-			Dependencies: flow.NewTaskIDs(deployVPA),
 		})
 	)
 
@@ -469,7 +480,7 @@ func (c *Controller) runReconcileShootFlow(o *operation.Operation) *gardencorev1
 		Logger:           o.Logger,
 		ProgressReporter: c.newProgressReporter(o.ReportShootProgress),
 		ErrorContext:     errorContext,
-		ErrorCleaner:     o.CleanShootTaskError,
+		ErrorCleaner:     o.CleanShootTaskErrorAndUpdateStatusLabel,
 	}); err != nil {
 		o.Logger.Errorf("Failed to reconcile Shoot %q: %+v", o.Shoot.Info.Name, err)
 		return gardencorev1beta1helper.NewWrappedLastErrors(gardencorev1beta1helper.FormatLastErrDescription(err), flow.Errors(err))

@@ -19,6 +19,7 @@
   * [Gardenlet](concepts/gardenlet.md)
 * [Backup Restore](concepts/backup-restore.md)
 * [Network Policies](concepts/network_policies.md)
+* [Relation between Gardener API and Cluster API](concepts/cluster-api.md)
 
 ## Usage
 
@@ -37,6 +38,7 @@
 * [Seed Settings](usage/seed_settings.md)
 * [Shoot cluster purposes](usage/shoot_purposes.md)
 * [Shoot Kubernetes and Operating System Versioning](usage/shoot_versions.md)
+* [Shoot Networking](usage/shoot_networking.md)
 * [Shoot Maintenance](usage/shoot_maintenance.md)
 * [Shoot Status](usage/shoot_status.md)
 * [Shoot Updates and Upgrades](usage/shoot_updates.md)
@@ -45,6 +47,7 @@
 * [Trigger shoot operations](usage/shoot_operations.md)
 * [Troubleshooting guide](usage/trouble_shooting_guide.md)
 * [Trusted TLS certificate for shoot control planes](usage/trusted-tls-for-control-planes.md)
+* [APIServerSNI environment variable injection](usage/apiserver-sni-injection.md)
 
 ## Proposals
 
@@ -61,6 +64,8 @@
 * [GEP-9: Gardener integration test framework](proposals/09-test-framework.md)
 * [GEP-10: Support additional container runtimes](proposals/10-shoot-additional-container-runtimes.md)
 * [GEP-11: Utilize API Server Network Proxy to Invert Seed-to-Shoot Connectivity](proposals/11-apiserver-network-proxy.md)
+* [GEP-12: OIDC Webhook Authenticator](proposals/12-oidc-webhook-authenticator.md)
+* [GEP-13: Automated Seed Management](proposals/13-automated-seed-management.md)
 
 ## Development
 
@@ -107,6 +112,7 @@
     * [`Extension` resource](extensions/extension.md)
 * [Extending project roles](extensions/project-roles.md)
 * [Referenced resources](extensions/referenced-resources.md)
+* [Control plane migration](extensions/migration.md)
 
 ## Testing
 

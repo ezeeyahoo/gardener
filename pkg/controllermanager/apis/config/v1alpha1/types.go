@@ -17,6 +17,8 @@ package v1alpha1
 import (
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	componentbaseconfigv1alpha1 "k8s.io/component-base/config/v1alpha1"
 	"k8s.io/klog"
@@ -131,6 +133,9 @@ type ProjectControllerConfiguration struct {
 	// checked whether it is actively used or got stale.
 	// +optional
 	MinimumLifetimeDays *int `json:"minimumLifetimeDays,omitempty"`
+	// Quotas is the default configuration matching projects are set up with if a quota is not already specified.
+	// +optional
+	Quotas []QuotaConfiguration `json:"quotas,omitempty"`
 	// StaleGracePeriodDays is the number of days a `Project` may be unused before it will
 	// be considered for checks whether it is actively used or got stale.
 	// +optional
@@ -142,6 +147,17 @@ type ProjectControllerConfiguration struct {
 	// StaleSyncPeriod is the duration how often the reconciliation loop for stale Projects is executed.
 	// +optional
 	StaleSyncPeriod *metav1.Duration `json:"staleSyncPeriod,omitempty"`
+}
+
+// QuotaConfiguration defines quota configurations.
+type QuotaConfiguration struct {
+	// Config is the quota specification used for the project set-up.
+	// Only v1.ResourceQuota resources are supported.
+	Config runtime.RawExtension `json:"config"`
+	// ProjectSelector is an optional setting to select the projects considered for quotas.
+	// Defaults to empty LabelSelector, which matches all projects.
+	// +optional
+	ProjectSelector *metav1.LabelSelector `json:"projectSelector,omitempty"`
 }
 
 // QuotaControllerConfiguration defines the configuration of the Quota controller.
@@ -214,6 +230,10 @@ type ShootReferenceControllerConfiguration struct {
 	// ConcurrentSyncs is the number of workers used for the controller to work on
 	// shoots.
 	ConcurrentSyncs int `json:"concurrentSyncs"`
+	// ProtectAuditPolicyConfigMaps controls whether the shoot reference controller shall protect ConfigMaps containing
+	// audit policies and referenced in Shoots.
+	// +optional
+	ProtectAuditPolicyConfigMaps *bool `json:"protectAuditPolicyConfigMaps,omitempty"`
 }
 
 // LeaderElectionConfiguration defines the configuration of leader election

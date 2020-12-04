@@ -30,12 +30,14 @@ import (
 	"github.com/gardener/gardener/pkg/client/kubernetes/clientmap/keys"
 	"github.com/gardener/gardener/pkg/controllermanager/apis/config"
 	controllermanagerconfigv1alpha1 "github.com/gardener/gardener/pkg/controllermanager/apis/config/v1alpha1"
+	configvalidation "github.com/gardener/gardener/pkg/controllermanager/apis/config/validation"
 	"github.com/gardener/gardener/pkg/controllermanager/controller"
 	controllermanagerfeatures "github.com/gardener/gardener/pkg/controllermanager/features"
 	"github.com/gardener/gardener/pkg/features"
 	"github.com/gardener/gardener/pkg/healthz"
 	"github.com/gardener/gardener/pkg/logger"
 	"github.com/gardener/gardener/pkg/server"
+	"github.com/gardener/gardener/pkg/version/verflag"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -131,6 +133,10 @@ func (o *Options) run(ctx context.Context, cancel context.CancelFunc) error {
 		o.config = c
 	}
 
+	if errs := configvalidation.ValidateControllerManagerConfiguration(o.config); len(errs) > 0 {
+		return errs.ToAggregate()
+	}
+
 	// Add feature flags
 	if err := controllermanagerfeatures.FeatureGate.SetFromMap(o.config.FeatureGates); err != nil {
 		return err
@@ -164,6 +170,8 @@ the main components of a Kubernetes cluster (etcd, API server, controller manage
 These so-called control plane components are hosted in Kubernetes clusters themselves
 (which are called Seed clusters).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			verflag.PrintAndExitIfRequested()
+
 			if err := opts.configFileSpecified(); err != nil {
 				return err
 			}
@@ -174,7 +182,9 @@ These so-called control plane components are hosted in Kubernetes clusters thems
 		},
 	}
 
-	opts.AddFlags(cmd.Flags())
+	flags := cmd.Flags()
+	verflag.AddFlags(flags)
+	opts.AddFlags(flags)
 	return cmd
 }
 

@@ -17,6 +17,7 @@ package health_test
 import (
 	"time"
 
+	resourcesv1alpha1 "github.com/gardener/gardener-resource-manager/pkg/apis/resources/v1alpha1"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
@@ -226,6 +227,59 @@ var _ = Describe("health", func() {
 		)
 	})
 
+	Describe("CheckSeedForMigration", func() {
+		DescribeTable("seeds",
+			func(seed *gardencorev1beta1.Seed, identity *gardencorev1beta1.Gardener, matcher types.GomegaMatcher) {
+				Expect(health.CheckSeedForMigration(seed, identity)).To(matcher)
+			},
+			Entry("healthy with matching version", &gardencorev1beta1.Seed{
+				Status: gardencorev1beta1.SeedStatus{
+					Gardener: &gardencorev1beta1.Gardener{Version: "1.12.8"},
+					Conditions: []gardencorev1beta1.Condition{
+						{Type: gardencorev1beta1.SeedGardenletReady, Status: gardencorev1beta1.ConditionTrue},
+						{Type: gardencorev1beta1.SeedBootstrapped, Status: gardencorev1beta1.ConditionTrue},
+					},
+				},
+			}, &gardencorev1beta1.Gardener{Version: "1.12.8"}, Succeed()),
+			Entry("healthy with non-matching version", &gardencorev1beta1.Seed{
+				Status: gardencorev1beta1.SeedStatus{
+					Gardener: &gardencorev1beta1.Gardener{Version: "1.12.8"},
+					Conditions: []gardencorev1beta1.Condition{
+						{Type: gardencorev1beta1.SeedGardenletReady, Status: gardencorev1beta1.ConditionTrue},
+						{Type: gardencorev1beta1.SeedBootstrapped, Status: gardencorev1beta1.ConditionTrue},
+					},
+				},
+			}, &gardencorev1beta1.Gardener{Version: "1.13.8"}, HaveOccurred()),
+			Entry("unhealthy available condition (bootstrapped) and matching version", &gardencorev1beta1.Seed{
+				Status: gardencorev1beta1.SeedStatus{
+					Gardener: &gardencorev1beta1.Gardener{Version: "1.12.8"},
+					Conditions: []gardencorev1beta1.Condition{
+						{Type: gardencorev1beta1.SeedGardenletReady, Status: gardencorev1beta1.ConditionTrue},
+						{Type: gardencorev1beta1.SeedBootstrapped, Status: gardencorev1beta1.ConditionFalse},
+					},
+				},
+			}, &gardencorev1beta1.Gardener{Version: "1.12.8"}, HaveOccurred()),
+			Entry("unhealthy available condition (gardenlet ready) and matching version", &gardencorev1beta1.Seed{
+				Status: gardencorev1beta1.SeedStatus{
+					Gardener: &gardencorev1beta1.Gardener{Version: "1.12.8"},
+					Conditions: []gardencorev1beta1.Condition{
+						{Type: gardencorev1beta1.SeedGardenletReady, Status: gardencorev1beta1.ConditionFalse},
+						{Type: gardencorev1beta1.SeedBootstrapped, Status: gardencorev1beta1.ConditionTrue},
+					},
+				},
+			}, &gardencorev1beta1.Gardener{Version: "1.12.8"}, HaveOccurred()),
+			Entry("unhealthy available condition (both conditions) and matching version", &gardencorev1beta1.Seed{
+				Status: gardencorev1beta1.SeedStatus{
+					Gardener: &gardencorev1beta1.Gardener{Version: "1.12.8"},
+					Conditions: []gardencorev1beta1.Condition{
+						{Type: gardencorev1beta1.SeedGardenletReady, Status: gardencorev1beta1.ConditionFalse},
+						{Type: gardencorev1beta1.SeedBootstrapped, Status: gardencorev1beta1.ConditionFalse},
+					},
+				},
+			}, &gardencorev1beta1.Gardener{Version: "1.12.8"}, HaveOccurred()),
+		)
+	})
+
 	Describe("CheckExtensionObject", func() {
 		DescribeTable("extension objects",
 			func(obj runtime.Object, match types.GomegaMatcher) {
@@ -370,4 +424,39 @@ var _ = Describe("health", func() {
 			})).To(Succeed())
 		})
 	})
+
+	DescribeTable("#CheckManagedResource",
+		func(managedResource *resourcesv1alpha1.ManagedResource, matcher types.GomegaMatcher) {
+			err := health.CheckManagedResource(managedResource)
+			Expect(err).To(matcher)
+		},
+		Entry("healthy", &resourcesv1alpha1.ManagedResource{
+			Status: resourcesv1alpha1.ManagedResourceStatus{Conditions: []resourcesv1alpha1.ManagedResourceCondition{
+				{
+					Type:   resourcesv1alpha1.ResourcesHealthy,
+					Status: resourcesv1alpha1.ConditionTrue,
+				},
+				{
+					Type:   resourcesv1alpha1.ResourcesApplied,
+					Status: resourcesv1alpha1.ConditionTrue,
+				},
+			}},
+		}, BeNil()),
+		Entry("unhealthy without available", &resourcesv1alpha1.ManagedResource{}, HaveOccurred()),
+		Entry("unhealthy with false available", &resourcesv1alpha1.ManagedResource{
+			Status: resourcesv1alpha1.ManagedResourceStatus{Conditions: []resourcesv1alpha1.ManagedResourceCondition{
+				{
+					Type:   resourcesv1alpha1.ResourcesHealthy,
+					Status: resourcesv1alpha1.ConditionTrue,
+				},
+				{
+					Type:   resourcesv1alpha1.ResourcesApplied,
+					Status: resourcesv1alpha1.ConditionFalse,
+				},
+			}},
+		}, HaveOccurred()),
+		Entry("not observed at latest version", &resourcesv1alpha1.ManagedResource{
+			ObjectMeta: metav1.ObjectMeta{Generation: 1},
+		}, HaveOccurred()),
+	)
 })

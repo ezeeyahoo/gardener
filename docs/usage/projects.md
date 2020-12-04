@@ -44,6 +44,9 @@ The `.spec.namespace` field is optional and will be initialized if it's unset.
 The name of the resulting namespace will be generated and look like `garden-dev-5anj3`, i.e., it has a random suffix.
 It's also possible to adopt existing namespaces by labeling them `gardener.cloud/role=project` and `project.gardener.cloud/name=dev` beforehand (otherwise, they cannot be adopted). 
 
+When deleting a Project resource, the corresponding namespace is also deleted. 
+To keep a namespace after project deletion, an administrator/operator (not Project members!) can label the project-namespace with `namespace.gardener.cloud/keep-after-project-deletion`.
+
 The `spec.description` and `.spec.purpose` fields can be used to describe to fellow team members and Gardener operators what this project is used for.
 
 Each project has one dedicated owner, configured in `.spec.owner` using the `rbac.authorization.k8s.io/v1.Subject` type.
@@ -84,5 +87,5 @@ The management of service account subjects (`kind=ServiecAccount` or `name=syste
 
 All newly created projects will only bind the owner to the `uam` role.
 The owner can still grant the `uam` role to other members if desired.
-For projects created before Gardener v1.8 the Gardener Controller Manager will migrate all projects to also assign the `uam` role to all `admin` members (to not break existing use-cases).
+For projects created before Gardener v1.8 the Gardener Controller Manager will migrate all projects to also assign the `uam` role to all `admin` members (to not break existing use-cases). The corresponding migration logic is present in Gardener Controller Manager from v1.8 to v1.13.
 The project owner can gradually remove these roles if desired. 

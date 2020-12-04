@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"time"
 
@@ -27,6 +26,7 @@ import (
 	"github.com/gardener/gardener/pkg/logger"
 	"github.com/gardener/gardener/pkg/operation/common"
 
+	"github.com/sirupsen/logrus"
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -42,9 +42,13 @@ type namespaceDeletionHandler struct {
 	k8sGardenClient kubernetes.Interface
 
 	codecs serializer.CodecFactory
+	logger logrus.FieldLogger
 }
 
-const waitForCachesToSyncTimeout = 5 * time.Minute
+const (
+	namespaceValidatorName     = "namespace_validator"
+	waitForCachesToSyncTimeout = 5 * time.Minute
+)
 
 // NewValidateNamespaceDeletionHandler creates a new handler for validating namespace deletions.
 func NewValidateNamespaceDeletionHandler(ctx context.Context, k8sGardenClient kubernetes.Interface) (http.HandlerFunc, error) {
@@ -70,53 +74,30 @@ func NewValidateNamespaceDeletionHandler(ctx context.Context, k8sGardenClient ku
 	scheme := runtime.NewScheme()
 	utilruntime.Must(corev1.AddToScheme(scheme))
 
-	h := &namespaceDeletionHandler{k8sGardenClient, serializer.NewCodecFactory(scheme)}
+	h := &namespaceDeletionHandler{
+		k8sGardenClient: k8sGardenClient,
+		codecs:          serializer.NewCodecFactory(scheme),
+		logger:          logger.NewFieldLogger(logger.Logger, "component", namespaceValidatorName),
+	}
 	return h.ValidateNamespaceDeletion, nil
 }
 
 // ValidateNamespaceDeletion is a HTTP handler for validating whether a namespace deletion is allowed or not.
 func (h *namespaceDeletionHandler) ValidateNamespaceDeletion(w http.ResponseWriter, r *http.Request) {
 	var (
-		body []byte
-
 		deserializer   = h.codecs.UniversalDeserializer()
-		receivedReview = admissionv1beta1.AdmissionReview{}
-
-		wantedContentType = runtime.ContentTypeJSON
-		wantedOperation   = admissionv1beta1.Delete
+		receivedReview = &admissionv1beta1.AdmissionReview{}
+		requestLogger  = logger.NewIDLogger(h.logger)
 	)
 
-	// Read HTTP request body into variable.
-	if r.Body != nil {
-		if data, err := ioutil.ReadAll(r.Body); err == nil {
-			body = data
-		}
-	}
-
-	// Verify that the correct content-type header has been sent.
-	if contentType := r.Header.Get("Content-Type"); contentType != wantedContentType {
-		err := fmt.Errorf("contentType=%s, expect %s", contentType, wantedContentType)
-		logger.Logger.Errorf(err.Error())
+	if err := DecodeAdmissionRequest(r, deserializer, receivedReview, maxRequestBody, requestLogger); err != nil {
+		requestLogger.Errorf(err.Error())
 		respond(w, errToAdmissionResponse(err))
 		return
 	}
 
-	// Deserialize HTTP request body into admissionv1beta1.AdmissionReview object.
-	if _, _, err := deserializer.Decode(body, nil, &receivedReview); err != nil {
-		logger.Logger.Errorf(err.Error())
-		respond(w, errToAdmissionResponse(err))
-		return
-	}
-
-	// If the request field is empty then do not admit (invalid body).
-	if receivedReview.Request == nil {
-		err := fmt.Errorf("invalid request body (missing admission request)")
-		logger.Logger.Errorf(err.Error())
-		respond(w, errToAdmissionResponse(err))
-		return
-	}
 	// If the request does not indicate the correct operation (DELETE) we allow the review without further doing.
-	if receivedReview.Request.Operation != wantedOperation {
+	if receivedReview.Request.Operation != admissionv1beta1.Delete {
 		respond(w, admissionResponse(true, ""))
 		return
 	}
@@ -124,7 +105,7 @@ func (h *namespaceDeletionHandler) ValidateNamespaceDeletion(w http.ResponseWrit
 	// Now that all checks have been passed we can actually validate the admission request.
 	reviewResponse := h.admitNamespaces(receivedReview.Request)
 	if !reviewResponse.Allowed && reviewResponse.Result != nil {
-		logger.Logger.Infof("Rejected 'DELETE namespace' request of user '%s': %v", receivedReview.Request.UserInfo.Username, reviewResponse.Result.Message)
+		requestLogger.Infof("Rejected 'DELETE namespace' request of user '%s': %v", receivedReview.Request.UserInfo.Username, reviewResponse.Result.Message)
 	}
 	respond(w, reviewResponse)
 }

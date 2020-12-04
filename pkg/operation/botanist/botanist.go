@@ -21,20 +21,18 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/client-go/util/retry"
-
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	v1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
 	"github.com/gardener/gardener/pkg/apis/core/v1beta1/helper"
-	"github.com/gardener/gardener/pkg/client/kubernetes"
+	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
 	"github.com/gardener/gardener/pkg/operation"
 	"github.com/gardener/gardener/pkg/operation/botanist/clusteridentity"
+	"github.com/gardener/gardener/pkg/operation/botanist/controlplane/etcd"
 	"github.com/gardener/gardener/pkg/operation/common"
 	shootpkg "github.com/gardener/gardener/pkg/operation/shoot"
 	kutil "github.com/gardener/gardener/pkg/utils/kubernetes"
 
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -76,6 +74,8 @@ func New(o *operation.Operation) (*Botanist, error) {
 	}
 
 	// extension components
+	o.Shoot.Components.Extensions.ControlPlane = b.DefaultControlPlane(b.K8sSeedClient.DirectClient(), extensionsv1alpha1.Normal)
+	o.Shoot.Components.Extensions.ControlPlaneExposure = b.DefaultControlPlane(b.K8sSeedClient.DirectClient(), extensionsv1alpha1.Exposure)
 	o.Shoot.Components.Extensions.DNS.ExternalProvider = b.DefaultExternalDNSProvider(b.K8sSeedClient.DirectClient())
 	o.Shoot.Components.Extensions.DNS.ExternalOwner = b.DefaultExternalDNSOwner(b.K8sSeedClient.DirectClient())
 	o.Shoot.Components.Extensions.DNS.ExternalEntry = b.DefaultExternalDNSEntry(b.K8sSeedClient.DirectClient())
@@ -97,16 +97,34 @@ func New(o *operation.Operation) (*Botanist, error) {
 		return nil, err
 	}
 
-	o.Shoot.Components.ControlPlane.KubeAPIServerSNIPhase = sniPhase
-
 	// control plane components
+	o.Shoot.Components.ControlPlane.EtcdMain, err = b.DefaultEtcd(v1beta1constants.ETCDRoleMain, etcd.ClassImportant)
+	if err != nil {
+		return nil, err
+	}
+	o.Shoot.Components.ControlPlane.EtcdEvents, err = b.DefaultEtcd(v1beta1constants.ETCDRoleEvents, etcd.ClassNormal)
+	if err != nil {
+		return nil, err
+	}
 	o.Shoot.Components.ControlPlane.KubeAPIServerService = b.DefaultKubeAPIServerService(sniPhase)
 	o.Shoot.Components.ControlPlane.KubeAPIServerSNI = b.DefaultKubeAPIServerSNI()
+	o.Shoot.Components.ControlPlane.KubeAPIServerSNIPhase = sniPhase
 	o.Shoot.Components.ControlPlane.KubeScheduler, err = b.DefaultKubeScheduler()
 	if err != nil {
 		return nil, err
 	}
+	o.Shoot.Components.ControlPlane.KubeControllerManager, err = b.DefaultKubeControllerManager()
+	if err != nil {
+		return nil, err
+	}
 	o.Shoot.Components.ControlPlane.ClusterAutoscaler, err = b.DefaultClusterAutoscaler()
+	if err != nil {
+		return nil, err
+	}
+
+	// system components
+	o.Shoot.Components.SystemComponents.Namespaces = b.DefaultShootNamespaces()
+	o.Shoot.Components.SystemComponents.MetricsServer, err = b.DefaultMetricsServer()
 	if err != nil {
 		return nil, err
 	}
@@ -166,30 +184,6 @@ func (b *Botanist) RequiredExtensionsReady(ctx context.Context) error {
 	return nil
 }
 
-// CreateETCDSnapshot executes to the ETCD main Pod and triggers snapshot.
-func (b *Botanist) CreateETCDSnapshot(ctx context.Context) error {
-	executor := kubernetes.NewPodExecutor(b.K8sSeedClient.RESTConfig())
-	namespace := b.Shoot.SeedNamespace
-	etcdMainSelector := getETCDMainLabelSelector()
-
-	podsList := &corev1.PodList{}
-	if err := b.K8sSeedClient.Client().List(ctx, podsList, client.InNamespace(namespace), client.MatchingLabelsSelector{Selector: etcdMainSelector}); err != nil {
-		return err
-	}
-
-	if len(podsList.Items) == 0 {
-		return fmt.Errorf("Didn't find any pods for selector: %v", etcdMainSelector)
-	}
-
-	if len(podsList.Items) > 1 {
-		return fmt.Errorf("Multiple ETCD Pods found. Pod list found: %v", podsList.Items)
-	}
-	etcdMainPod := podsList.Items[0]
-
-	_, err := executor.Execute(b.Shoot.SeedNamespace, etcdMainPod.GetName(), "backup-restore", "/bin/sh", "curl -k https://etcd-main-local:8080/snapshot/full")
-	return err
-}
-
 // UpdateShootAndCluster updates the given `core.gardener.cloud/v1beta1.Shoot` resource in the garden cluster after
 // applying the given transform function to it. It will also update the `shoot` field in the
 // extensions.gardener.cloud/v1alpha1.Cluster` resource in the seed cluster with the updated shoot information.
@@ -204,12 +198,4 @@ func (b *Botanist) UpdateShootAndCluster(ctx context.Context, shoot *gardencorev
 
 	b.Shoot.Info = shoot
 	return nil
-}
-
-func getETCDMainLabelSelector() labels.Selector {
-	selector := labels.NewSelector()
-	roleIsMain, _ := labels.NewRequirement("role", selection.Equals, []string{"main"})
-	appIsETCD, _ := labels.NewRequirement("app", selection.Equals, []string{"etcd-statefulset"})
-
-	return selector.Add(*roleIsMain, *appIsETCD)
 }

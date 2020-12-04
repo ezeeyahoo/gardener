@@ -169,6 +169,36 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
+	if err := s.AddGeneratedConversionFunc((*ResourcesConfiguration)(nil), (*config.ResourcesConfiguration)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_ResourcesConfiguration_To_config_ResourcesConfiguration(a.(*ResourcesConfiguration), b.(*config.ResourcesConfiguration), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*config.ResourcesConfiguration)(nil), (*ResourcesConfiguration)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_config_ResourcesConfiguration_To_v1alpha1_ResourcesConfiguration(a.(*config.ResourcesConfiguration), b.(*ResourcesConfiguration), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*SNI)(nil), (*config.SNI)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_SNI_To_config_SNI(a.(*SNI), b.(*config.SNI), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*config.SNI)(nil), (*SNI)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_config_SNI_To_v1alpha1_SNI(a.(*config.SNI), b.(*SNI), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*SNIIngress)(nil), (*config.SNIIngress)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_SNIIngress_To_config_SNIIngress(a.(*SNIIngress), b.(*config.SNIIngress), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*config.SNIIngress)(nil), (*SNIIngress)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_config_SNIIngress_To_v1alpha1_SNIIngress(a.(*config.SNIIngress), b.(*SNIIngress), scope)
+	}); err != nil {
+		return err
+	}
 	if err := s.AddGeneratedConversionFunc((*SeedAPIServerNetworkPolicyControllerConfiguration)(nil), (*config.SeedAPIServerNetworkPolicyControllerConfiguration)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha1_SeedAPIServerNetworkPolicyControllerConfiguration_To_config_SeedAPIServerNetworkPolicyControllerConfiguration(a.(*SeedAPIServerNetworkPolicyControllerConfiguration), b.(*config.SeedAPIServerNetworkPolicyControllerConfiguration), scope)
 	}); err != nil {
@@ -266,6 +296,16 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}
 	if err := s.AddGeneratedConversionFunc((*config.ShootStateSyncControllerConfiguration)(nil), (*ShootStateSyncControllerConfiguration)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_config_ShootStateSyncControllerConfiguration_To_v1alpha1_ShootStateSyncControllerConfiguration(a.(*config.ShootStateSyncControllerConfiguration), b.(*ShootStateSyncControllerConfiguration), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*ShootedSeedRegistrationControllerConfiguration)(nil), (*config.ShootedSeedRegistrationControllerConfiguration)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha1_ShootedSeedRegistrationControllerConfiguration_To_config_ShootedSeedRegistrationControllerConfiguration(a.(*ShootedSeedRegistrationControllerConfiguration), b.(*config.ShootedSeedRegistrationControllerConfiguration), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddGeneratedConversionFunc((*config.ShootedSeedRegistrationControllerConfiguration)(nil), (*ShootedSeedRegistrationControllerConfiguration)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_config_ShootedSeedRegistrationControllerConfiguration_To_v1alpha1_ShootedSeedRegistrationControllerConfiguration(a.(*config.ShootedSeedRegistrationControllerConfiguration), b.(*ShootedSeedRegistrationControllerConfiguration), scope)
 	}); err != nil {
 		return err
 	}
@@ -505,6 +545,7 @@ func autoConvert_v1alpha1_GardenletConfiguration_To_config_GardenletConfiguratio
 	} else {
 		out.Controllers = nil
 	}
+	out.Resources = (*config.ResourcesConfiguration)(unsafe.Pointer(in.Resources))
 	if in.LeaderElection != nil {
 		in, out := &in.LeaderElection, &out.LeaderElection
 		*out = new(config.LeaderElectionConfiguration)
@@ -521,6 +562,7 @@ func autoConvert_v1alpha1_GardenletConfiguration_To_config_GardenletConfiguratio
 	out.SeedConfig = (*config.SeedConfig)(unsafe.Pointer(in.SeedConfig))
 	out.SeedSelector = (*v1.LabelSelector)(unsafe.Pointer(in.SeedSelector))
 	out.Logging = (*config.Logging)(unsafe.Pointer(in.Logging))
+	out.SNI = (*config.SNI)(unsafe.Pointer(in.SNI))
 	return nil
 }
 
@@ -566,6 +608,7 @@ func autoConvert_config_GardenletConfiguration_To_v1alpha1_GardenletConfiguratio
 	} else {
 		out.Controllers = nil
 	}
+	out.Resources = (*ResourcesConfiguration)(unsafe.Pointer(in.Resources))
 	if in.LeaderElection != nil {
 		in, out := &in.LeaderElection, &out.LeaderElection
 		*out = new(LeaderElectionConfiguration)
@@ -582,6 +625,7 @@ func autoConvert_config_GardenletConfiguration_To_v1alpha1_GardenletConfiguratio
 	out.SeedConfig = (*SeedConfig)(unsafe.Pointer(in.SeedConfig))
 	out.SeedSelector = (*v1.LabelSelector)(unsafe.Pointer(in.SeedSelector))
 	out.Logging = (*Logging)(unsafe.Pointer(in.Logging))
+	out.SNI = (*SNI)(unsafe.Pointer(in.SNI))
 	return nil
 }
 
@@ -608,6 +652,7 @@ func autoConvert_v1alpha1_GardenletControllerConfiguration_To_config_GardenletCo
 		out.ShootCare = nil
 	}
 	out.ShootStateSync = (*config.ShootStateSyncControllerConfiguration)(unsafe.Pointer(in.ShootStateSync))
+	out.ShootedSeedRegistration = (*config.ShootedSeedRegistrationControllerConfiguration)(unsafe.Pointer(in.ShootedSeedRegistration))
 	out.SeedAPIServerNetworkPolicy = (*config.SeedAPIServerNetworkPolicyControllerConfiguration)(unsafe.Pointer(in.SeedAPIServerNetworkPolicy))
 	return nil
 }
@@ -635,6 +680,7 @@ func autoConvert_config_GardenletControllerConfiguration_To_v1alpha1_GardenletCo
 		out.ShootCare = nil
 	}
 	out.ShootStateSync = (*ShootStateSyncControllerConfiguration)(unsafe.Pointer(in.ShootStateSync))
+	out.ShootedSeedRegistration = (*ShootedSeedRegistrationControllerConfiguration)(unsafe.Pointer(in.ShootedSeedRegistration))
 	out.SeedAPIServerNetworkPolicy = (*SeedAPIServerNetworkPolicyControllerConfiguration)(unsafe.Pointer(in.SeedAPIServerNetworkPolicy))
 	return nil
 }
@@ -716,6 +762,72 @@ func autoConvert_config_Logging_To_v1alpha1_Logging(in *config.Logging, out *Log
 // Convert_config_Logging_To_v1alpha1_Logging is an autogenerated conversion function.
 func Convert_config_Logging_To_v1alpha1_Logging(in *config.Logging, out *Logging, s conversion.Scope) error {
 	return autoConvert_config_Logging_To_v1alpha1_Logging(in, out, s)
+}
+
+func autoConvert_v1alpha1_ResourcesConfiguration_To_config_ResourcesConfiguration(in *ResourcesConfiguration, out *config.ResourcesConfiguration, s conversion.Scope) error {
+	out.Capacity = *(*corev1.ResourceList)(unsafe.Pointer(&in.Capacity))
+	out.Reserved = *(*corev1.ResourceList)(unsafe.Pointer(&in.Reserved))
+	return nil
+}
+
+// Convert_v1alpha1_ResourcesConfiguration_To_config_ResourcesConfiguration is an autogenerated conversion function.
+func Convert_v1alpha1_ResourcesConfiguration_To_config_ResourcesConfiguration(in *ResourcesConfiguration, out *config.ResourcesConfiguration, s conversion.Scope) error {
+	return autoConvert_v1alpha1_ResourcesConfiguration_To_config_ResourcesConfiguration(in, out, s)
+}
+
+func autoConvert_config_ResourcesConfiguration_To_v1alpha1_ResourcesConfiguration(in *config.ResourcesConfiguration, out *ResourcesConfiguration, s conversion.Scope) error {
+	out.Capacity = *(*corev1.ResourceList)(unsafe.Pointer(&in.Capacity))
+	out.Reserved = *(*corev1.ResourceList)(unsafe.Pointer(&in.Reserved))
+	return nil
+}
+
+// Convert_config_ResourcesConfiguration_To_v1alpha1_ResourcesConfiguration is an autogenerated conversion function.
+func Convert_config_ResourcesConfiguration_To_v1alpha1_ResourcesConfiguration(in *config.ResourcesConfiguration, out *ResourcesConfiguration, s conversion.Scope) error {
+	return autoConvert_config_ResourcesConfiguration_To_v1alpha1_ResourcesConfiguration(in, out, s)
+}
+
+func autoConvert_v1alpha1_SNI_To_config_SNI(in *SNI, out *config.SNI, s conversion.Scope) error {
+	out.Ingress = (*config.SNIIngress)(unsafe.Pointer(in.Ingress))
+	return nil
+}
+
+// Convert_v1alpha1_SNI_To_config_SNI is an autogenerated conversion function.
+func Convert_v1alpha1_SNI_To_config_SNI(in *SNI, out *config.SNI, s conversion.Scope) error {
+	return autoConvert_v1alpha1_SNI_To_config_SNI(in, out, s)
+}
+
+func autoConvert_config_SNI_To_v1alpha1_SNI(in *config.SNI, out *SNI, s conversion.Scope) error {
+	out.Ingress = (*SNIIngress)(unsafe.Pointer(in.Ingress))
+	return nil
+}
+
+// Convert_config_SNI_To_v1alpha1_SNI is an autogenerated conversion function.
+func Convert_config_SNI_To_v1alpha1_SNI(in *config.SNI, out *SNI, s conversion.Scope) error {
+	return autoConvert_config_SNI_To_v1alpha1_SNI(in, out, s)
+}
+
+func autoConvert_v1alpha1_SNIIngress_To_config_SNIIngress(in *SNIIngress, out *config.SNIIngress, s conversion.Scope) error {
+	out.ServiceName = (*string)(unsafe.Pointer(in.ServiceName))
+	out.Namespace = (*string)(unsafe.Pointer(in.Namespace))
+	out.Labels = *(*map[string]string)(unsafe.Pointer(&in.Labels))
+	return nil
+}
+
+// Convert_v1alpha1_SNIIngress_To_config_SNIIngress is an autogenerated conversion function.
+func Convert_v1alpha1_SNIIngress_To_config_SNIIngress(in *SNIIngress, out *config.SNIIngress, s conversion.Scope) error {
+	return autoConvert_v1alpha1_SNIIngress_To_config_SNIIngress(in, out, s)
+}
+
+func autoConvert_config_SNIIngress_To_v1alpha1_SNIIngress(in *config.SNIIngress, out *SNIIngress, s conversion.Scope) error {
+	out.ServiceName = (*string)(unsafe.Pointer(in.ServiceName))
+	out.Namespace = (*string)(unsafe.Pointer(in.Namespace))
+	out.Labels = *(*map[string]string)(unsafe.Pointer(&in.Labels))
+	return nil
+}
+
+// Convert_config_SNIIngress_To_v1alpha1_SNIIngress is an autogenerated conversion function.
+func Convert_config_SNIIngress_To_v1alpha1_SNIIngress(in *config.SNIIngress, out *SNIIngress, s conversion.Scope) error {
+	return autoConvert_config_SNIIngress_To_v1alpha1_SNIIngress(in, out, s)
 }
 
 func autoConvert_v1alpha1_SeedAPIServerNetworkPolicyControllerConfiguration_To_config_SeedAPIServerNetworkPolicyControllerConfiguration(in *SeedAPIServerNetworkPolicyControllerConfiguration, out *config.SeedAPIServerNetworkPolicyControllerConfiguration, s conversion.Scope) error {
@@ -927,6 +1039,7 @@ func autoConvert_v1alpha1_ShootControllerConfiguration_To_config_ShootController
 	out.RespectSyncPeriodOverwrite = (*bool)(unsafe.Pointer(in.RespectSyncPeriodOverwrite))
 	out.RetryDuration = (*v1.Duration)(unsafe.Pointer(in.RetryDuration))
 	out.SyncPeriod = (*v1.Duration)(unsafe.Pointer(in.SyncPeriod))
+	out.DNSEntryTTLSeconds = (*int64)(unsafe.Pointer(in.DNSEntryTTLSeconds))
 	return nil
 }
 
@@ -942,6 +1055,7 @@ func autoConvert_config_ShootControllerConfiguration_To_v1alpha1_ShootController
 	out.RespectSyncPeriodOverwrite = (*bool)(unsafe.Pointer(in.RespectSyncPeriodOverwrite))
 	out.RetryDuration = (*v1.Duration)(unsafe.Pointer(in.RetryDuration))
 	out.SyncPeriod = (*v1.Duration)(unsafe.Pointer(in.SyncPeriod))
+	out.DNSEntryTTLSeconds = (*int64)(unsafe.Pointer(in.DNSEntryTTLSeconds))
 	return nil
 }
 
@@ -970,6 +1084,26 @@ func autoConvert_config_ShootStateSyncControllerConfiguration_To_v1alpha1_ShootS
 // Convert_config_ShootStateSyncControllerConfiguration_To_v1alpha1_ShootStateSyncControllerConfiguration is an autogenerated conversion function.
 func Convert_config_ShootStateSyncControllerConfiguration_To_v1alpha1_ShootStateSyncControllerConfiguration(in *config.ShootStateSyncControllerConfiguration, out *ShootStateSyncControllerConfiguration, s conversion.Scope) error {
 	return autoConvert_config_ShootStateSyncControllerConfiguration_To_v1alpha1_ShootStateSyncControllerConfiguration(in, out, s)
+}
+
+func autoConvert_v1alpha1_ShootedSeedRegistrationControllerConfiguration_To_config_ShootedSeedRegistrationControllerConfiguration(in *ShootedSeedRegistrationControllerConfiguration, out *config.ShootedSeedRegistrationControllerConfiguration, s conversion.Scope) error {
+	out.SyncJitterPeriod = (*v1.Duration)(unsafe.Pointer(in.SyncJitterPeriod))
+	return nil
+}
+
+// Convert_v1alpha1_ShootedSeedRegistrationControllerConfiguration_To_config_ShootedSeedRegistrationControllerConfiguration is an autogenerated conversion function.
+func Convert_v1alpha1_ShootedSeedRegistrationControllerConfiguration_To_config_ShootedSeedRegistrationControllerConfiguration(in *ShootedSeedRegistrationControllerConfiguration, out *config.ShootedSeedRegistrationControllerConfiguration, s conversion.Scope) error {
+	return autoConvert_v1alpha1_ShootedSeedRegistrationControllerConfiguration_To_config_ShootedSeedRegistrationControllerConfiguration(in, out, s)
+}
+
+func autoConvert_config_ShootedSeedRegistrationControllerConfiguration_To_v1alpha1_ShootedSeedRegistrationControllerConfiguration(in *config.ShootedSeedRegistrationControllerConfiguration, out *ShootedSeedRegistrationControllerConfiguration, s conversion.Scope) error {
+	out.SyncJitterPeriod = (*v1.Duration)(unsafe.Pointer(in.SyncJitterPeriod))
+	return nil
+}
+
+// Convert_config_ShootedSeedRegistrationControllerConfiguration_To_v1alpha1_ShootedSeedRegistrationControllerConfiguration is an autogenerated conversion function.
+func Convert_config_ShootedSeedRegistrationControllerConfiguration_To_v1alpha1_ShootedSeedRegistrationControllerConfiguration(in *config.ShootedSeedRegistrationControllerConfiguration, out *ShootedSeedRegistrationControllerConfiguration, s conversion.Scope) error {
+	return autoConvert_config_ShootedSeedRegistrationControllerConfiguration_To_v1alpha1_ShootedSeedRegistrationControllerConfiguration(in, out, s)
 }
 
 func autoConvert_v1alpha1_TLSServer_To_config_TLSServer(in *TLSServer, out *config.TLSServer, s conversion.Scope) error {

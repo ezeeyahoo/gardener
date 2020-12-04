@@ -17,11 +17,14 @@ package botanist_test
 import (
 	"testing"
 
+	"github.com/gardener/gardener/pkg/gardenlet/features"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
 
 func TestBotanist(t *testing.T) {
+	features.RegisterFeatureGates()
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Botanist Suite")
 }

@@ -3878,6 +3878,65 @@ Starting from kubernetes v1.19, the API server&rsquo;s watch cache size is adapt
 cache size flags will have no effect, except when setting it to 0 (which disables the watch cache).</p>
 </td>
 </tr>
+<tr>
+<td>
+<code>requests</code></br>
+<em>
+<a href="#core.gardener.cloud/v1beta1.KubeAPIServerRequests">
+KubeAPIServerRequests
+</a>
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>Requests contains configuration for request-specific settings for the kube-apiserver.</p>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="core.gardener.cloud/v1beta1.KubeAPIServerRequests">KubeAPIServerRequests
+</h3>
+<p>
+(<em>Appears on:</em>
+<a href="#core.gardener.cloud/v1beta1.KubeAPIServerConfig">KubeAPIServerConfig</a>)
+</p>
+<p>
+<p>KubeAPIServerRequests contains configuration for request-specific settings for the kube-apiserver.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>maxNonMutatingInflight</code></br>
+<em>
+int32
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>MaxNonMutatingInflight is the maximum number of non-mutating requests in flight at a given time. When the server
+exceeds this, it rejects requests.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>maxMutatingInflight</code></br>
+<em>
+int32
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>MaxMutatingInflight is the maximum number of mutating requests in flight at a given time. When the server
+exceeds this, it rejects requests.</p>
+</td>
+</tr>
 </tbody>
 </table>
 <h3 id="core.gardener.cloud/v1beta1.KubeControllerManagerConfig">KubeControllerManagerConfig
@@ -3936,6 +3995,20 @@ int32
 <td>
 <em>(Optional)</em>
 <p>NodeCIDRMaskSize defines the mask size for node cidr in cluster (default is 24)</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>podEvictionTimeout</code></br>
+<em>
+<a href="https://godoc.org/k8s.io/apimachinery/pkg/apis/meta/v1#Duration">
+Kubernetes meta/v1.Duration
+</a>
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>PodEvictionTimeout defines the grace period for deleting pods on failed nodes. Defaults to 2m.</p>
 </td>
 </tr>
 </tbody>
@@ -4263,7 +4336,7 @@ KubeletConfigReserved
 <em>(Optional)</em>
 <p>KubeReserved is the configuration for resources reserved for kubernetes node components (mainly kubelet and container runtime).
 When updating these values, be aware that cgroup resizes may not succeed on active worker nodes. Look for the NodeAllocatableEnforced event to determine if the configuration was applied.
-Default: cpu=80m,memory=1Gi</p>
+Default: cpu=80m,memory=1Gi,pid=20k</p>
 </td>
 </tr>
 <tr>
@@ -7429,6 +7502,35 @@ string
 <td>
 <em>(Optional)</em>
 <p>ClusterIdentity is the identity of the Seed cluster</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>capacity</code></br>
+<em>
+<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.15/#resourcelist-v1-core">
+Kubernetes core/v1.ResourceList
+</a>
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>Capacity represents the total resources of a seed.</p>
+</td>
+</tr>
+<tr>
+<td>
+<code>allocatable</code></br>
+<em>
+<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.15/#resourcelist-v1-core">
+Kubernetes core/v1.ResourceList
+</a>
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>Allocatable represents the resources of a seed that are available for scheduling.
+Defaults to Capacity.</p>
 </td>
 </tr>
 </tbody>

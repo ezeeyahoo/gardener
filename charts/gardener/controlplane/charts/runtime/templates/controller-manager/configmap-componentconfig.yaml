@@ -53,6 +53,10 @@ data:
         {{- if .Values.global.controller.config.controllers.project.staleSyncPeriod }}
         staleSyncPeriod: {{ .Values.global.controller.config.controllers.project.staleSyncPeriod }}
         {{- end }}
+        {{- if .Values.global.controller.config.controllers.project.quotas }}
+        quotas:
+{{ toYaml .Values.global.controller.config.controllers.project.quotas | indent 10 }}
+        {{- end }}
       {{- end }}
       {{- if .Values.global.controller.config.controllers.quota }}
       quota:
@@ -94,6 +98,7 @@ data:
         concurrentSyncs: {{ required ".Values.global.controller.config.controllers.shootHibernation.concurrentSyncs is required" .Values.global.controller.config.controllers.shootHibernation.concurrentSyncs }}
       shootReference:
         concurrentSyncs: {{ required ".Values.global.controller.config.controllers.shootReference.concurrentSyncs is required" .Values.global.controller.config.controllers.shootReference.concurrentSyncs }}
+        protectAuditPolicyConfigMaps: {{ required ".Values.global.controller.config.controllers.shootReference.protectAuditPolicyConfigMaps is required" .Values.global.controller.config.controllers.shootReference.protectAuditPolicyConfigMaps }}
     leaderElection:
       leaderElect: {{ required ".Values.global.controller.config.leaderElection.leaderElect is required" .Values.global.controller.config.leaderElection.leaderElect }}
       leaseDuration: {{ required ".Values.global.controller.config.leaderElection.leaseDuration is required" .Values.global.controller.config.leaderElection.leaseDuration }}

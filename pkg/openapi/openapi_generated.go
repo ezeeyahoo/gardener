@@ -80,6 +80,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/gardener/gardener/pkg/apis/core/v1alpha1.HibernationSchedule":                   schema_pkg_apis_core_v1alpha1_HibernationSchedule(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1alpha1.HorizontalPodAutoscalerConfig":         schema_pkg_apis_core_v1alpha1_HorizontalPodAutoscalerConfig(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1alpha1.KubeAPIServerConfig":                   schema_pkg_apis_core_v1alpha1_KubeAPIServerConfig(ref),
+		"github.com/gardener/gardener/pkg/apis/core/v1alpha1.KubeAPIServerRequests":                 schema_pkg_apis_core_v1alpha1_KubeAPIServerRequests(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1alpha1.KubeControllerManagerConfig":           schema_pkg_apis_core_v1alpha1_KubeControllerManagerConfig(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1alpha1.KubeProxyConfig":                       schema_pkg_apis_core_v1alpha1_KubeProxyConfig(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1alpha1.KubeSchedulerConfig":                   schema_pkg_apis_core_v1alpha1_KubeSchedulerConfig(ref),
@@ -211,6 +212,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/gardener/gardener/pkg/apis/core/v1beta1.HibernationSchedule":                    schema_pkg_apis_core_v1beta1_HibernationSchedule(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1beta1.HorizontalPodAutoscalerConfig":          schema_pkg_apis_core_v1beta1_HorizontalPodAutoscalerConfig(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1beta1.KubeAPIServerConfig":                    schema_pkg_apis_core_v1beta1_KubeAPIServerConfig(ref),
+		"github.com/gardener/gardener/pkg/apis/core/v1beta1.KubeAPIServerRequests":                  schema_pkg_apis_core_v1beta1_KubeAPIServerRequests(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1beta1.KubeControllerManagerConfig":            schema_pkg_apis_core_v1beta1_KubeControllerManagerConfig(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1beta1.KubeProxyConfig":                        schema_pkg_apis_core_v1beta1_KubeProxyConfig(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1beta1.KubeSchedulerConfig":                    schema_pkg_apis_core_v1beta1_KubeSchedulerConfig(ref),
@@ -2627,11 +2629,44 @@ func schema_pkg_apis_core_v1alpha1_KubeAPIServerConfig(ref common.ReferenceCallb
 							Ref:         ref("github.com/gardener/gardener/pkg/apis/core/v1alpha1.WatchCacheSizes"),
 						},
 					},
+					"requests": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Requests contains configuration for request-specific settings for the kube-apiserver.",
+							Ref:         ref("github.com/gardener/gardener/pkg/apis/core/v1alpha1.KubeAPIServerRequests"),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			"github.com/gardener/gardener/pkg/apis/core/v1alpha1.AdmissionPlugin", "github.com/gardener/gardener/pkg/apis/core/v1alpha1.AuditConfig", "github.com/gardener/gardener/pkg/apis/core/v1alpha1.OIDCConfig", "github.com/gardener/gardener/pkg/apis/core/v1alpha1.ServiceAccountConfig", "github.com/gardener/gardener/pkg/apis/core/v1alpha1.WatchCacheSizes"},
+			"github.com/gardener/gardener/pkg/apis/core/v1alpha1.AdmissionPlugin", "github.com/gardener/gardener/pkg/apis/core/v1alpha1.AuditConfig", "github.com/gardener/gardener/pkg/apis/core/v1alpha1.KubeAPIServerRequests", "github.com/gardener/gardener/pkg/apis/core/v1alpha1.OIDCConfig", "github.com/gardener/gardener/pkg/apis/core/v1alpha1.ServiceAccountConfig", "github.com/gardener/gardener/pkg/apis/core/v1alpha1.WatchCacheSizes"},
+	}
+}
+
+func schema_pkg_apis_core_v1alpha1_KubeAPIServerRequests(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KubeAPIServerRequests contains configuration for request-specific settings for the kube-apiserver.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"maxNonMutatingInflight": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxNonMutatingInflight is the maximum number of non-mutating requests in flight at a given time. When the server exceeds this, it rejects requests.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"maxMutatingInflight": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxMutatingInflight is the maximum number of mutating requests in flight at a given time. When the server exceeds this, it rejects requests.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -2670,11 +2705,17 @@ func schema_pkg_apis_core_v1alpha1_KubeControllerManagerConfig(ref common.Refere
 							Format:      "int32",
 						},
 					},
+					"podEvictionTimeout": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PodEvictionTimeout defines the grace period for deleting pods on failed nodes. Defaults to 2m.",
+							Ref:         ref("k8s.io/apimachinery/pkg/apis/meta/v1.Duration"),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			"github.com/gardener/gardener/pkg/apis/core/v1alpha1.HorizontalPodAutoscalerConfig"},
+			"github.com/gardener/gardener/pkg/apis/core/v1alpha1.HorizontalPodAutoscalerConfig", "k8s.io/apimachinery/pkg/apis/meta/v1.Duration"},
 	}
 }
 
@@ -2850,7 +2891,7 @@ func schema_pkg_apis_core_v1alpha1_KubeletConfig(ref common.ReferenceCallback) c
 					},
 					"kubeReserved": {
 						SchemaProps: spec.SchemaProps{
-							Description: "KubeReserved is the configuration for resources reserved for kubernetes node components (mainly kubelet and container runtime). When updating these values, be aware that cgroup resizes may not succeed on active worker nodes. Look for the NodeAllocatableEnforced event to determine if the configuration was applied. Default: cpu=80m,memory=1Gi",
+							Description: "KubeReserved is the configuration for resources reserved for kubernetes node components (mainly kubelet and container runtime). When updating these values, be aware that cgroup resizes may not succeed on active worker nodes. Look for the NodeAllocatableEnforced event to determine if the configuration was applied. Default: cpu=80m,memory=1Gi,pid=20k",
 							Ref:         ref("github.com/gardener/gardener/pkg/apis/core/v1alpha1.KubeletConfigReserved"),
 						},
 					},
@@ -8583,11 +8624,44 @@ func schema_pkg_apis_core_v1beta1_KubeAPIServerConfig(ref common.ReferenceCallba
 							Ref:         ref("github.com/gardener/gardener/pkg/apis/core/v1beta1.WatchCacheSizes"),
 						},
 					},
+					"requests": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Requests contains configuration for request-specific settings for the kube-apiserver.",
+							Ref:         ref("github.com/gardener/gardener/pkg/apis/core/v1beta1.KubeAPIServerRequests"),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			"github.com/gardener/gardener/pkg/apis/core/v1beta1.AdmissionPlugin", "github.com/gardener/gardener/pkg/apis/core/v1beta1.AuditConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.OIDCConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.ServiceAccountConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.WatchCacheSizes"},
+			"github.com/gardener/gardener/pkg/apis/core/v1beta1.AdmissionPlugin", "github.com/gardener/gardener/pkg/apis/core/v1beta1.AuditConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.KubeAPIServerRequests", "github.com/gardener/gardener/pkg/apis/core/v1beta1.OIDCConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.ServiceAccountConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.WatchCacheSizes"},
+	}
+}
+
+func schema_pkg_apis_core_v1beta1_KubeAPIServerRequests(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "KubeAPIServerRequests contains configuration for request-specific settings for the kube-apiserver.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"maxNonMutatingInflight": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxNonMutatingInflight is the maximum number of non-mutating requests in flight at a given time. When the server exceeds this, it rejects requests.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"maxMutatingInflight": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxMutatingInflight is the maximum number of mutating requests in flight at a given time. When the server exceeds this, it rejects requests.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -8626,11 +8700,17 @@ func schema_pkg_apis_core_v1beta1_KubeControllerManagerConfig(ref common.Referen
 							Format:      "int32",
 						},
 					},
+					"podEvictionTimeout": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PodEvictionTimeout defines the grace period for deleting pods on failed nodes. Defaults to 2m.",
+							Ref:         ref("k8s.io/apimachinery/pkg/apis/meta/v1.Duration"),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			"github.com/gardener/gardener/pkg/apis/core/v1beta1.HorizontalPodAutoscalerConfig"},
+			"github.com/gardener/gardener/pkg/apis/core/v1beta1.HorizontalPodAutoscalerConfig", "k8s.io/apimachinery/pkg/apis/meta/v1.Duration"},
 	}
 }
 
@@ -8806,7 +8886,7 @@ func schema_pkg_apis_core_v1beta1_KubeletConfig(ref common.ReferenceCallback) co
 					},
 					"kubeReserved": {
 						SchemaProps: spec.SchemaProps{
-							Description: "KubeReserved is the configuration for resources reserved for kubernetes node components (mainly kubelet and container runtime). When updating these values, be aware that cgroup resizes may not succeed on active worker nodes. Look for the NodeAllocatableEnforced event to determine if the configuration was applied. Default: cpu=80m,memory=1Gi",
+							Description: "KubeReserved is the configuration for resources reserved for kubernetes node components (mainly kubelet and container runtime). When updating these values, be aware that cgroup resizes may not succeed on active worker nodes. Look for the NodeAllocatableEnforced event to determine if the configuration was applied. Default: cpu=80m,memory=1Gi,pid=20k",
 							Ref:         ref("github.com/gardener/gardener/pkg/apis/core/v1beta1.KubeletConfigReserved"),
 						},
 					},
@@ -11403,11 +11483,39 @@ func schema_pkg_apis_core_v1beta1_SeedStatus(ref common.ReferenceCallback) commo
 							Format:      "",
 						},
 					},
+					"capacity": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Capacity represents the total resources of a seed.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref("k8s.io/apimachinery/pkg/api/resource.Quantity"),
+									},
+								},
+							},
+						},
+					},
+					"allocatable": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Allocatable represents the resources of a seed that are available for scheduling. Defaults to Capacity.",
+							Type:        []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Ref: ref("k8s.io/apimachinery/pkg/api/resource.Quantity"),
+									},
+								},
+							},
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			"github.com/gardener/gardener/pkg/apis/core/v1beta1.Condition", "github.com/gardener/gardener/pkg/apis/core/v1beta1.Gardener"},
+			"github.com/gardener/gardener/pkg/apis/core/v1beta1.Condition", "github.com/gardener/gardener/pkg/apis/core/v1beta1.Gardener", "k8s.io/apimachinery/pkg/api/resource.Quantity"},
 	}
 }
 
@@ -12521,7 +12629,7 @@ func schema_pkg_apis_settings_v1alpha1_ClusterOpenIDConnectPresetSpec(ref common
 					},
 					"projectSelector": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Project decides whether to apply the configuration if the Shoot is in a specific Project mathching the label selector. Use the selector only if the OIDC Preset is opt-in, because end users may skip the admission by setting the labels. Default to the empty LabelSelector, which matches everything.",
+							Description: "Project decides whether to apply the configuration if the Shoot is in a specific Project matching the label selector. Use the selector only if the OIDC Preset is opt-in, because end users may skip the admission by setting the labels. Defaults to the empty LabelSelector, which matches everything.",
 							Ref:         ref("k8s.io/apimachinery/pkg/apis/meta/v1.LabelSelector"),
 						},
 					},

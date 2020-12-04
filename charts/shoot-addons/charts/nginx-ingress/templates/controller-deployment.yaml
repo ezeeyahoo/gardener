@@ -3,7 +3,7 @@ apiVersion: {{ include "deploymentversion" . }}
 kind: Deployment
 metadata:
   labels:
-    garden.sapcloud.io/role: optional-addon
+    gardener.cloud/role: optional-addon
     app: {{ template "nginx-ingress.name" . }}
     chart: {{ .Chart.Name }}-{{ .Chart.Version }}
     component: "{{ .Values.controller.name }}"
@@ -30,7 +30,7 @@ spec:
       {{- end }}
       labels:
         origin: gardener
-        garden.sapcloud.io/role: optional-addon
+        gardener.cloud/role: optional-addon
         app: {{ template "nginx-ingress.name" . }}
         component: "{{ .Values.controller.name }}"
         release: {{ .Release.Name }}
@@ -81,6 +81,10 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.namespace
+        {{- if .Values.kubeAPIServerHost }}
+          - name: KUBERNETES_SERVICE_HOST
+            value: {{ .Values.kubeAPIServerHost}}
+        {{- end }}
           livenessProbe:
             failureThreshold: 3
             httpGet:

@@ -163,6 +163,21 @@ global:
           value: "1G"
           percentage: 70
 
+ #  goAwayChance: 0.1
+ #  http2MaxStreamsPerConnection: 1000
+ #  shutdownDelayDuration: 20s
+ #  requests:
+ #    maxNonMutatingInflight: 400
+ #    maxMutatingInflight: 200
+ #    minTimeout: 1m0s
+ #    timeout: 1m0s
+ #  watchCacheSizes:
+ #    default: 100
+ #    resources:
+ #    - apiGroup: core.gardener.cloud
+ #      resource: shoots
+ #      size: 500
+
     audit:
  #    dynamicConfiguration: false                             Enables dynamic audit configuration. This feature also requires the DynamicAuditing feature flag
       log:
@@ -330,6 +345,16 @@ global:
   #       staleGracePeriodDays: 14
   #       staleExpirationTimeDays: 90
   #       staleSyncPeriod: 12h
+  #       quotas: # Please make sure ResourceQuota controller (https://github.com/kubernetes/kubernetes/blob/release-1.2/docs/design/admission_control_resource_quota.md#resource-quota-controller) is enabled for Kube-Controller-Manager when using `ResourceQuotas`.
+  #       - config:
+  #           apiVersion: v1
+  #           kind: ResourceQuota
+  #           spec:
+  #             hard:
+  #               count/shoots.core.gardener.cloud: "100"
+  #               count/secretbindings.core.gardener.cloud: "10"
+  #               count/secrets: "400"
+  #         projectSelector: {}
         seed:
           concurrentSyncs: 5
           syncPeriod: 1m
@@ -346,6 +371,7 @@ global:
           syncPeriod: 24h
         shootReference:
           concurrentSyncs: 5
+          protectAuditPolicyConfigMaps: false
       leaderElection:
         leaderElect: true
         leaseDuration: 15s

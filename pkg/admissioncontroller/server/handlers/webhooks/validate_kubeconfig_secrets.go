@@ -17,12 +17,12 @@ package webhooks
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 
 	"github.com/gardener/gardener/pkg/client/kubernetes"
 	"github.com/gardener/gardener/pkg/logger"
 
+	"github.com/sirupsen/logrus"
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,57 +34,37 @@ import (
 
 type kubeconfigSecretValidator struct {
 	codecs serializer.CodecFactory
+	logger logrus.FieldLogger
 }
+
+const kubeconfigValidatorName = "kubeconfig_validator"
 
 // NewValidateKubeconfigSecretsHandler creates a new handler for validating namespace deletions.
 func NewValidateKubeconfigSecretsHandler() http.HandlerFunc {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(corev1.AddToScheme(scheme))
 
-	h := &kubeconfigSecretValidator{serializer.NewCodecFactory(scheme)}
+	h := &kubeconfigSecretValidator{
+		codecs: serializer.NewCodecFactory(scheme),
+		logger: logger.NewFieldLogger(logger.Logger, "component", kubeconfigValidatorName),
+	}
 	return h.ValidateKubeconfigSecrets
 }
 
 // ValidateKubeconfigSecrets is a HTTP handler for validating whether a namespace deletion is allowed or not.
 func (h *kubeconfigSecretValidator) ValidateKubeconfigSecrets(w http.ResponseWriter, r *http.Request) {
 	var (
-		body []byte
-
 		deserializer   = h.codecs.UniversalDeserializer()
-		receivedReview = admissionv1beta1.AdmissionReview{}
-
-		wantedContentType = runtime.ContentTypeJSON
+		receivedReview = &admissionv1beta1.AdmissionReview{}
+		requestLogger  = logger.NewIDLogger(h.logger)
 	)
 
-	// Read HTTP request body into variable.
-	if r.Body != nil {
-		if data, err := ioutil.ReadAll(r.Body); err == nil {
-			body = data
-		}
-	}
-
-	// Verify that the correct content-type header has been sent.
-	if contentType := r.Header.Get("Content-Type"); contentType != wantedContentType {
-		err := fmt.Errorf("contentType=%s, expect %s", contentType, wantedContentType)
-		logger.Logger.Errorf(err.Error())
+	if err := DecodeAdmissionRequest(r, deserializer, receivedReview, maxRequestBody, requestLogger); err != nil {
+		requestLogger.Errorf(err.Error())
 		respond(w, errToAdmissionResponse(err))
 		return
 	}
 
-	// Deserialize HTTP request body into admissionv1beta1.AdmissionReview object.
-	if _, _, err := deserializer.Decode(body, nil, &receivedReview); err != nil {
-		logger.Logger.Errorf(err.Error())
-		respond(w, errToAdmissionResponse(err))
-		return
-	}
-
-	// If the request field is empty then do not admit (invalid body).
-	if receivedReview.Request == nil {
-		err := fmt.Errorf("invalid request body (missing admission request)")
-		logger.Logger.Errorf(err.Error())
-		respond(w, errToAdmissionResponse(err))
-		return
-	}
 	// If the request does not indicate the correct operations (CREATE, UPDATE) we allow the review without further doing.
 	if receivedReview.Request.Operation != admissionv1beta1.Create && receivedReview.Request.Operation != admissionv1beta1.Update {
 		respond(w, admissionResponse(true, ""))
@@ -94,7 +74,7 @@ func (h *kubeconfigSecretValidator) ValidateKubeconfigSecrets(w http.ResponseWri
 	// Now that all checks have been passed we can actually validate the admission request.
 	reviewResponse := h.admitSecrets(receivedReview.Request, deserializer)
 	if !reviewResponse.Allowed && reviewResponse.Result != nil {
-		logger.Logger.Infof("Rejected '%s secret/%s/%s' request of user '%s': %v", receivedReview.Request.Operation, receivedReview.Request.Namespace, receivedReview.Request.Name, receivedReview.Request.UserInfo.Username, reviewResponse.Result.Message)
+		requestLogger.Infof("Rejected '%s secret/%s/%s' request of user '%s': %v", receivedReview.Request.Operation, receivedReview.Request.Namespace, receivedReview.Request.Name, receivedReview.Request.UserInfo.Username, reviewResponse.Result.Message)
 	}
 	respond(w, reviewResponse)
 }

@@ -16,15 +16,16 @@ package clusterautoscaler
 
 import (
 	"context"
+	"time"
 
 	"github.com/gardener/gardener/pkg/client/kubernetes"
+	"github.com/gardener/gardener/pkg/operation/botanist/component"
 	"github.com/gardener/gardener/pkg/operation/common"
+	"github.com/gardener/gardener/pkg/utils/managedresources"
 
 	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -33,11 +34,22 @@ const (
 	managedResourceControlName = "cluster-autoscaler"
 )
 
-// BootstrapSeed deploys the RBAC configuration for the control cluster.
-func BootstrapSeed(ctx context.Context, c client.Client, namespace, _ string) error {
+// NewBootstrapper creates a new instance of DeployWaiter for the cluster-autoscaler bootstrapper.
+func NewBootstrapper(client client.Client, namespace string) component.DeployWaiter {
+	return &bootstrapper{
+		client:    client,
+		namespace: namespace,
+	}
+}
+
+type bootstrapper struct {
+	client    client.Client
+	namespace string
+}
+
+func (b *bootstrapper) Deploy(ctx context.Context) error {
 	var (
-		versions = schema.GroupVersions([]schema.GroupVersion{rbacv1.SchemeGroupVersion})
-		codec    = kubernetes.ShootCodec.CodecForVersions(kubernetes.ShootSerializer, kubernetes.ShootSerializer, versions, versions)
+		registry = managedresources.NewRegistry(kubernetes.SeedScheme, kubernetes.SeedCodec, kubernetes.SeedSerializer)
 
 		clusterRole = &rbacv1.ClusterRole{
 			ObjectMeta: metav1.ObjectMeta{
@@ -51,10 +63,34 @@ func BootstrapSeed(ctx context.Context, c client.Client, namespace, _ string) er
 				},
 			},
 		}
-		clusterRoleYAML, _ = runtime.Encode(codec, clusterRole)
 	)
 
-	return common.DeployManagedResource(ctx, c, managedResourceControlName, namespace, false, map[string][]byte{
-		"clusterrole.yaml": clusterRoleYAML,
-	})
+	resources, err := registry.AddAllAndSerialize(clusterRole)
+	if err != nil {
+		return err
+	}
+
+	return common.DeployManagedResourceForSeed(ctx, b.client, managedResourceControlName, b.namespace, false, resources)
+}
+
+func (b *bootstrapper) Destroy(ctx context.Context) error {
+	return common.DeleteManagedResourceForSeed(ctx, b.client, managedResourceControlName, b.namespace)
+}
+
+// TimeoutWaitForManagedResource is the timeout used while waiting for the ManagedResources to become healthy
+// or deleted.
+var TimeoutWaitForManagedResource = 2 * time.Minute
+
+func (b *bootstrapper) Wait(ctx context.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, TimeoutWaitForManagedResource)
+	defer cancel()
+
+	return managedresources.WaitUntilManagedResourceHealthy(timeoutCtx, b.client, b.namespace, managedResourceControlName)
+}
+
+func (b *bootstrapper) WaitCleanup(ctx context.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, TimeoutWaitForManagedResource)
+	defer cancel()
+
+	return managedresources.WaitUntilManagedResourceDeleted(timeoutCtx, b.client, b.namespace, managedResourceControlName)
 }

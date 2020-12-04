@@ -6,12 +6,18 @@ metadata:
   namespace: kube-system
   labels:
     gardener.cloud/role: system-component
+    # TODO (ialidzhikov): remove in a future version
     garden.sapcloud.io/role: system-component
     app: vpn-shoot
     origin: gardener
 spec:
   revisionHistoryLimit: 0
   replicas: 1
+  strategy:
+    rollingUpdate:
+      maxSurge: 100%
+      maxUnavailable: 0%
+    type: RollingUpdate
   selector:
     matchLabels:
       app: vpn-shoot
@@ -27,6 +33,7 @@ spec:
       labels:
         origin: gardener
         gardener.cloud/role: system-component
+        # TODO (ialidzhikov): remove in a future version
         garden.sapcloud.io/role: system-component
         app: vpn-shoot
         type: tunnel
@@ -34,6 +41,7 @@ spec:
       automountServiceAccountToken: false
       serviceAccountName: vpn-shoot
       priorityClassName: system-cluster-critical
+      dnsPolicy: Default # make sure to not use the coredns for DNS resolution.
       nodeSelector:
         worker.gardener.cloud/system-components: "true"
       tolerations:

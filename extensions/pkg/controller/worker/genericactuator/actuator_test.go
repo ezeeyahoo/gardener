@@ -16,27 +16,22 @@ package genericactuator
 
 import (
 	"context"
-	"errors"
-	"fmt"
+
+	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/extensions/table"
+	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/gardener/gardener/extensions/pkg/controller/worker"
 	workerhelper "github.com/gardener/gardener/extensions/pkg/controller/worker/helper"
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	extensionsv1alpha1 "github.com/gardener/gardener/pkg/apis/extensions/v1alpha1"
-	mockclient "github.com/gardener/gardener/pkg/mock/controller-runtime/client"
-
-	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
-	"github.com/golang/mock/gomock"
-	"github.com/hashicorp/go-multierror"
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/ginkgo/extensions/table"
-	. "github.com/onsi/gomega"
-	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 var _ = Describe("Actuator", func() {
@@ -83,145 +78,6 @@ var _ = Describe("Actuator", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(actual.Items).To(HaveLen(1))
 			Expect(actual.Items[0].Name).To(Equal(expected.Name))
-		})
-	})
-
-	Describe("#CleanupLeakedClusterRoles", func() {
-		var (
-			ctrl *gomock.Controller
-
-			ctx = context.TODO()
-			c   *mockclient.MockClient
-
-			providerName = "provider-foo"
-			fakeErr      = errors.New("fake")
-
-			namespace1              = "abcd"
-			namespace2              = "efgh"
-			namespace3              = "ijkl"
-			nonMatchingClusterRoles = []rbacv1.ClusterRole{
-				{ObjectMeta: metav1.ObjectMeta{Name: "doesnotmatch"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:provider-bar:%s:machine-controller-manager", namespace1)}},
-				{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:%s", providerName, namespace1)}},
-				{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:%s:bar", providerName, namespace1)}},
-				{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:machine-controller-manager", providerName)}},
-			}
-		)
-
-		BeforeEach(func() {
-			ctrl = gomock.NewController(GinkgoT())
-			c = mockclient.NewMockClient(ctrl)
-		})
-
-		AfterEach(func() {
-			ctrl.Finish()
-		})
-
-		It("should return an error while listing the clusterroles", func() {
-			c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&rbacv1.ClusterRoleList{})).Return(fakeErr)
-
-			Expect(CleanupLeakedClusterRoles(ctx, c, providerName)).To(Equal(fakeErr))
-		})
-
-		It("should return an error while listing the namespaces", func() {
-			c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&rbacv1.ClusterRoleList{}))
-			c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&corev1.NamespaceList{})).Return(fakeErr)
-
-			Expect(CleanupLeakedClusterRoles(ctx, c, providerName)).To(Equal(fakeErr))
-		})
-
-		It("should do nothing because clusterrole list is empty", func() {
-			c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&rbacv1.ClusterRoleList{}))
-			c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&corev1.NamespaceList{}))
-
-			Expect(CleanupLeakedClusterRoles(ctx, c, providerName)).To(Succeed())
-		})
-
-		It("should do nothing because clusterrole list doesn't contain matches", func() {
-			c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&rbacv1.ClusterRoleList{})).DoAndReturn(func(_ context.Context, list *rbacv1.ClusterRoleList, _ ...client.ListOption) error {
-				*list = rbacv1.ClusterRoleList{Items: nonMatchingClusterRoles}
-				return nil
-			})
-			c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&corev1.NamespaceList{}))
-
-			Expect(CleanupLeakedClusterRoles(ctx, c, providerName)).To(Succeed())
-		})
-
-		It("should do nothing because no orphaned clusterroles found", func() {
-			c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&rbacv1.ClusterRoleList{})).DoAndReturn(func(_ context.Context, list *rbacv1.ClusterRoleList, _ ...client.ListOption) error {
-				*list = rbacv1.ClusterRoleList{
-					Items: append(nonMatchingClusterRoles, rbacv1.ClusterRole{
-						ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:%s:machine-controller-manager", providerName, namespace1)},
-					}),
-				}
-				return nil
-			})
-			c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&corev1.NamespaceList{})).DoAndReturn(func(_ context.Context, list *corev1.NamespaceList, _ ...client.ListOption) error {
-				*list = corev1.NamespaceList{
-					Items: []corev1.Namespace{
-						{ObjectMeta: metav1.ObjectMeta{Name: namespace1}},
-					},
-				}
-				return nil
-			})
-
-			Expect(CleanupLeakedClusterRoles(ctx, c, providerName)).To(Succeed())
-		})
-
-		It("should delete the orphaned clusterroles", func() {
-			c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&rbacv1.ClusterRoleList{})).DoAndReturn(func(_ context.Context, list *rbacv1.ClusterRoleList, _ ...client.ListOption) error {
-				*list = rbacv1.ClusterRoleList{
-					Items: append(
-						nonMatchingClusterRoles,
-						rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:%s:machine-controller-manager", providerName, namespace1)}},
-						rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:%s:machine-controller-manager", providerName, namespace2)}},
-						rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:%s:machine-controller-manager", providerName, namespace3)}},
-					),
-				}
-				return nil
-			})
-			c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&corev1.NamespaceList{})).DoAndReturn(func(_ context.Context, list *corev1.NamespaceList, _ ...client.ListOption) error {
-				*list = corev1.NamespaceList{
-					Items: []corev1.Namespace{
-						{ObjectMeta: metav1.ObjectMeta{Name: namespace1}},
-					},
-				}
-				return nil
-			})
-			c.EXPECT().Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:%s:machine-controller-manager", providerName, namespace2)}})
-			c.EXPECT().Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:%s:machine-controller-manager", providerName, namespace3)}})
-
-			Expect(CleanupLeakedClusterRoles(ctx, c, providerName)).To(Succeed())
-		})
-
-		It("should return the error occurred during orphaned clusterrole deletion", func() {
-			c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&rbacv1.ClusterRoleList{})).DoAndReturn(func(_ context.Context, list *rbacv1.ClusterRoleList, _ ...client.ListOption) error {
-				*list = rbacv1.ClusterRoleList{
-					Items: append(
-						nonMatchingClusterRoles,
-						rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:%s:machine-controller-manager", providerName, namespace1)}},
-						rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:%s:machine-controller-manager", providerName, namespace2)}},
-						rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:%s:machine-controller-manager", providerName, namespace3)}},
-					),
-				}
-				return nil
-			})
-			c.EXPECT().List(ctx, gomock.AssignableToTypeOf(&corev1.NamespaceList{})).DoAndReturn(func(_ context.Context, list *corev1.NamespaceList, _ ...client.ListOption) error {
-				*list = corev1.NamespaceList{
-					Items: []corev1.Namespace{
-						{ObjectMeta: metav1.ObjectMeta{Name: namespace1}},
-					},
-				}
-				return nil
-			})
-			c.EXPECT().Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:%s:machine-controller-manager", providerName, namespace2)}})
-			c.EXPECT().Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("extensions.gardener.cloud:%s:%s:machine-controller-manager", providerName, namespace3)}}).Return(fakeErr)
-
-			err := CleanupLeakedClusterRoles(ctx, c, providerName)
-
-			Expect(err).To(HaveOccurred())
-			Expect(err).To(BeAssignableToTypeOf(&multierror.Error{}))
-			Expect(err.(*multierror.Error).Errors).To(Equal([]error{fakeErr}))
 		})
 	})
 
@@ -392,5 +248,85 @@ var _ = Describe("Actuator", func() {
 			Entry("should be stuck - machine set does not have matching matching class", []machinev1alpha1.MachineSet{machineSetOtherMachineClass}, machineDeployments, true),
 			Entry("should be stuck - no machine set with matching owner reference", []machinev1alpha1.MachineSet{machineSetOtherOwner}, machineDeployments, true),
 		)
+	})
+
+	Describe("#updateCloudCredentialsForUnwantedMachineDeployments", func() {
+		const (
+			workerNamespace           = "test-ns"
+			machineClassSecretName1   = "machine-class-secret1"
+			machineClassSecretName2   = "machine-class-secret2"
+			nonMachineClassSecretName = "non-machine-class-secret"
+		)
+
+		var (
+			all    []runtime.Object
+			logger = log.Log.WithName("test")
+
+			usernameKey   = "username"
+			usernameValue = []byte("username")
+
+			cloudCredentials = map[string][]byte{
+				usernameKey: usernameValue,
+			}
+			machineClassSecret1 = &corev1.Secret{
+				Data: map[string][]byte{
+					"key": []byte("value"),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      machineClassSecretName1,
+					Namespace: workerNamespace,
+					Labels:    map[string]string{"gardener.cloud/purpose": "machineclass"},
+				},
+			}
+			machineClassSecret2 = &corev1.Secret{
+				Data: map[string][]byte{
+					usernameKey: []byte("outadated-username"),
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      machineClassSecretName2,
+					Namespace: workerNamespace,
+					Labels:    map[string]string{"gardener.cloud/purpose": "machineclass"},
+				},
+			}
+			nonMachineClassSecret = &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      nonMachineClassSecretName,
+					Namespace: workerNamespace,
+				},
+			}
+		)
+
+		BeforeEach(func() {
+			all = []runtime.Object{
+				machineClassSecret1,
+				machineClassSecret2,
+				nonMachineClassSecret,
+			}
+		})
+
+		It("should update the cloud credentials for all machine class secret", func() {
+			a := &genericActuator{client: fake.NewFakeClient(all...)}
+			secret1 := &corev1.Secret{}
+			secret2 := &corev1.Secret{}
+			secret3 := &corev1.Secret{}
+
+			Expect(a.updateCloudCredentialsInAllMachineClassSecrets(context.TODO(), logger, cloudCredentials, workerNamespace)).ToNot(HaveOccurred())
+			Expect(a.client.Get(context.TODO(), client.ObjectKey{Name: machineClassSecretName1, Namespace: workerNamespace}, secret1)).ToNot(HaveOccurred())
+			Expect(a.client.Get(context.TODO(), client.ObjectKey{Name: machineClassSecretName2, Namespace: workerNamespace}, secret2)).ToNot(HaveOccurred())
+			Expect(a.client.Get(context.TODO(), client.ObjectKey{Name: nonMachineClassSecretName, Namespace: workerNamespace}, secret3)).ToNot(HaveOccurred())
+
+			for key, value := range cloudCredentials {
+				v, ok := secret1.Data[key]
+				Expect(ok).To(BeTrue())
+				Expect(v).To(Equal(value))
+
+				v, ok = secret2.Data[key]
+				Expect(ok).To(BeTrue())
+				Expect(v).To(Equal(value))
+
+				_, ok = secret3.Data[key]
+				Expect(ok).To(BeFalse())
+			}
+		})
 	})
 })

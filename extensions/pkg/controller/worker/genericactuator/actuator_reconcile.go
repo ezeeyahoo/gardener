@@ -110,6 +110,15 @@ func (a *genericActuator) Reconcile(ctx context.Context, worker *extensionsv1alp
 		return errors.Wrapf(err, "failed to deploy the machine classes")
 	}
 
+	// Update cloud credentials for all existing machine class secrets
+	cloudCredentials, err := workerDelegate.GetMachineControllerManagerCloudCredentials(ctx)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get the cloud credentials in namespace %s", worker.Namespace)
+	}
+	if err = a.updateCloudCredentialsInAllMachineClassSecrets(ctx, logger, cloudCredentials, worker.Namespace); err != nil {
+		return errors.Wrapf(err, "failed to update cloud credentials in machine class secrets for namespace %s", worker.Namespace)
+	}
+
 	// Update the machine images in the worker provider status.
 	if err := workerDelegate.UpdateMachineImagesStatus(ctx); err != nil {
 		return errors.Wrapf(err, "failed to update the machine image status")
@@ -359,20 +368,6 @@ func (a *genericActuator) waitUntilWantedMachineDeploymentsAvailable(ctx context
 				continue
 			}
 
-			machineSets := ownerReferenceToMachineSet[deployment.Name]
-
-			// use `wanted deployment` for these checks, as the existing deployments can be based on an outdated cache
-			alreadyExistingMachineDeployment := alreadyExistingMachineDeploymentNames.Has(wantedDeployment.Name)
-			newMachineClass := !alreadyExistingMachineClassNames.Has(wantedDeployment.ClassName)
-
-			if alreadyExistingMachineDeployment && newMachineClass {
-				logger.Info("Machine deployment is performing a rolling update", "machineDeployment", &deployment)
-				// Already existing machine deployments with a rolling update should have > 1 machine sets
-				if len(machineSets) <= 1 {
-					return retryutils.MinorError(fmt.Errorf("waiting for the MachineControllerManager to create the machine sets for the machine deployment (%s/%s)", deployment.Namespace, deployment.Name))
-				}
-			}
-
 			// We want to wait until all wanted machine deployments have as many
 			// available replicas as desired (specified in the .spec.replicas).
 			// However, if we see any error in the status of the deployment then we return it.
@@ -385,6 +380,23 @@ func (a *genericActuator) waitUntilWantedMachineDeploymentsAvailable(ctx context
 			// Skip further checks if cluster is hibernated because MachineControllerManager is usually scaled down during hibernation.
 			if controller.IsHibernated(cluster) {
 				continue
+			}
+
+			// we only care about rolling updates when the cluster is not hibernated
+			// when hibernated, just wait until the sum of `.Status.Replicas` over all machine deployments equals 0.
+			machineSets := ownerReferenceToMachineSet[deployment.Name]
+			// use `wanted deployment` for these checks, as the existing deployments can be based on an outdated cache
+			alreadyExistingMachineDeployment := alreadyExistingMachineDeploymentNames.Has(wantedDeployment.Name)
+			newMachineClass := !alreadyExistingMachineClassNames.Has(wantedDeployment.ClassName)
+
+			if alreadyExistingMachineDeployment && newMachineClass {
+				logger.Info("Machine deployment is performing a rolling update", "machineDeployment", &deployment)
+				// Already existing machine deployments with a rolling update should have > 1 machine sets
+				if len(machineSets) <= 1 {
+					msg := fmt.Sprintf("waiting for the MachineControllerManager to create the machine sets for the machine deployment (%s/%s)", deployment.Namespace, deployment.Name)
+					logger.Info(msg)
+					return retryutils.MinorError(fmt.Errorf(msg))
+				}
 			}
 
 			// If the Shoot is not hibernated we want to make sure that the machine set with the right

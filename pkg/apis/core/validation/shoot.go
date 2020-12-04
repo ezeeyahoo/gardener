@@ -26,6 +26,7 @@ import (
 	"github.com/gardener/gardener/pkg/apis/core"
 	"github.com/gardener/gardener/pkg/apis/core/helper"
 	v1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
+	"github.com/gardener/gardener/pkg/features"
 	"github.com/gardener/gardener/pkg/operation/botanist"
 	"github.com/gardener/gardener/pkg/utils"
 	cidrvalidation "github.com/gardener/gardener/pkg/utils/validation/cidr"
@@ -43,6 +44,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 )
 
 var (
@@ -148,7 +150,7 @@ func ValidateShootSpecUpdate(newSpec, oldSpec *core.ShootSpec, deletionTimestamp
 	allErrs = append(allErrs, apivalidation.ValidateImmutableField(newSpec.Region, oldSpec.Region, fldPath.Child("region"))...)
 	allErrs = append(allErrs, apivalidation.ValidateImmutableField(newSpec.CloudProfileName, oldSpec.CloudProfileName, fldPath.Child("cloudProfileName"))...)
 	allErrs = append(allErrs, apivalidation.ValidateImmutableField(newSpec.SecretBindingName, oldSpec.SecretBindingName, fldPath.Child("secretBindingName"))...)
-	if oldSpec.SeedName != nil {
+	if oldSpec.SeedName != nil && !utilfeature.DefaultFeatureGate.Enabled(features.SeedChange) {
 		// allow initial seed assignment
 		allErrs = append(allErrs, apivalidation.ValidateImmutableField(newSpec.SeedName, oldSpec.SeedName, fldPath.Child("seedName"))...)
 	}
@@ -158,7 +160,7 @@ func ValidateShootSpecUpdate(newSpec, oldSpec *core.ShootSpec, deletionTimestamp
 	allErrs = append(allErrs, validateDNSUpdate(newSpec.DNS, oldSpec.DNS, seedGotAssigned, fldPath.Child("dns"))...)
 	allErrs = append(allErrs, validateKubernetesVersionUpdate(newSpec.Kubernetes.Version, oldSpec.Kubernetes.Version, fldPath.Child("kubernetes", "version"))...)
 	allErrs = append(allErrs, validateKubeProxyModeUpdate(newSpec.Kubernetes.KubeProxy, oldSpec.Kubernetes.KubeProxy, newSpec.Kubernetes.Version, fldPath.Child("kubernetes", "kubeProxy"))...)
-	allErrs = append(allErrs, validateKubeControllerManagerConfiguration(newSpec.Kubernetes.KubeControllerManager, oldSpec.Kubernetes.KubeControllerManager, fldPath.Child("kubernetes", "kubeControllerManager"))...)
+	allErrs = append(allErrs, validateKubeControllerManagerUpdate(newSpec.Kubernetes.KubeControllerManager, oldSpec.Kubernetes.KubeControllerManager, fldPath.Child("kubernetes", "kubeControllerManager"))...)
 	allErrs = append(allErrs, ValidateProviderUpdate(&newSpec.Provider, &oldSpec.Provider, fldPath.Child("provider"))...)
 
 	allErrs = append(allErrs, apivalidation.ValidateImmutableField(newSpec.Networking.Type, oldSpec.Networking.Type, fldPath.Child("networking", "type"))...)
@@ -283,22 +285,22 @@ func ValidateNodeCIDRMaskWithMaxPod(maxPod int32, nodeCIDRMaskSize int32) field.
 	return allErrs
 }
 
-func validateKubeControllerManagerConfiguration(newConfig, oldConfig *core.KubeControllerManagerConfig, fldPath *field.Path) field.ErrorList {
+func validateKubeControllerManagerUpdate(newConfig, oldConfig *core.KubeControllerManagerConfig, fldPath *field.Path) field.ErrorList {
 	allErrs := field.ErrorList{}
 
 	var (
-		newSize *int32
-		oldSize *int32
+		nodeCIDRMaskNew *int32
+		nodeCIDRMaskOld *int32
 	)
 
 	if newConfig != nil {
-		newSize = newConfig.NodeCIDRMaskSize
+		nodeCIDRMaskNew = newConfig.NodeCIDRMaskSize
 	}
 	if oldConfig != nil {
-		oldSize = oldConfig.NodeCIDRMaskSize
+		nodeCIDRMaskOld = oldConfig.NodeCIDRMaskSize
 	}
 
-	allErrs = append(allErrs, apivalidation.ValidateImmutableField(newSize, oldSize, fldPath.Child("nodeCIDRMaskSize"))...)
+	allErrs = append(allErrs, apivalidation.ValidateImmutableField(nodeCIDRMaskNew, nodeCIDRMaskOld, fldPath.Child("nodeCIDRMaskSize"))...)
 
 	return allErrs
 }
@@ -569,7 +571,29 @@ func validateKubernetes(kubernetes core.Kubernetes, fldPath *field.Path) field.E
 			}
 		}
 
-		allErrs = append(allErrs, ValidateWatchCacheSizes(kubeAPIServer.WatchCacheSizes, fldPath.Child("watchCacheSizes"))...)
+		allErrs = append(allErrs, ValidateWatchCacheSizes(kubeAPIServer.WatchCacheSizes, fldPath.Child("kubeAPIServer", "watchCacheSizes"))...)
+
+		if kubeAPIServer.Requests != nil {
+			const maxMaxNonMutatingRequestsInflight = 800
+			if v := kubeAPIServer.Requests.MaxNonMutatingInflight; v != nil {
+				path := fldPath.Child("kubeAPIServer", "requests", "maxNonMutatingInflight")
+
+				allErrs = append(allErrs, apivalidation.ValidateNonnegativeField(int64(*v), path)...)
+				if *v > maxMaxNonMutatingRequestsInflight {
+					allErrs = append(allErrs, field.Invalid(path, *v, fmt.Sprintf("cannot set higher than %d", maxMaxNonMutatingRequestsInflight)))
+				}
+			}
+
+			const maxMaxMutatingRequestsInflight = 400
+			if v := kubeAPIServer.Requests.MaxMutatingInflight; v != nil {
+				path := fldPath.Child("kubeAPIServer", "requests", "maxMutatingInflight")
+
+				allErrs = append(allErrs, apivalidation.ValidateNonnegativeField(int64(*v), path)...)
+				if *v > maxMaxMutatingRequestsInflight {
+					allErrs = append(allErrs, field.Invalid(path, *v, fmt.Sprintf("cannot set higher than %d", maxMaxMutatingRequestsInflight)))
+				}
+			}
+		}
 	}
 
 	allErrs = append(allErrs, validateKubeControllerManager(kubernetes.Version, kubernetes.KubeControllerManager, fldPath.Child("kubeControllerManager"))...)
@@ -679,12 +703,18 @@ func validateKubeControllerManager(kubernetesVersion string, kcm *core.KubeContr
 	if err != nil {
 		allErrs = append(allErrs, field.Invalid(fldPath, kubernetesVersion, err.Error()))
 	}
+
 	if kcm != nil {
 		if maskSize := kcm.NodeCIDRMaskSize; maskSize != nil {
 			if *maskSize < 16 || *maskSize > 28 {
 				allErrs = append(allErrs, field.Invalid(fldPath.Child("nodeCIDRMaskSize"), *maskSize, "nodeCIDRMaskSize must be between 16 and 28"))
 			}
 		}
+
+		if podEvictionTimeout := kcm.PodEvictionTimeout; podEvictionTimeout != nil && podEvictionTimeout.Duration <= 0 {
+			allErrs = append(allErrs, field.Invalid(fldPath.Child("podEvictionTimeout"), podEvictionTimeout.Duration, "podEvictionTimeout must be larger than 0"))
+		}
+
 		if hpa := kcm.HorizontalPodAutoscalerConfig; hpa != nil {
 			fldPath = fldPath.Child("horizontalPodAutoscaler")
 
@@ -730,6 +760,7 @@ func validateKubeControllerManager(kubernetesVersion string, kcm *core.KubeContr
 			}
 		}
 	}
+
 	return allErrs
 }
 
@@ -792,12 +823,12 @@ func validateMaintenance(maintenance *core.Maintenance, fldPath *field.Path) fie
 
 		if err == nil {
 			duration := maintenanceTimeWindow.Duration()
-			if duration > 6*time.Hour {
-				allErrs = append(allErrs, field.Forbidden(fldPath.Child("timeWindow"), "time window must not be greater than 6 hours"))
+			if duration > core.MaintenanceTimeWindowDurationMaximum {
+				allErrs = append(allErrs, field.Forbidden(fldPath.Child("timeWindow"), fmt.Sprintf("time window must not be greater than %s", core.MaintenanceTimeWindowDurationMaximum)))
 				return allErrs
 			}
-			if duration < 30*time.Minute {
-				allErrs = append(allErrs, field.Forbidden(fldPath.Child("timeWindow"), "time window must not be smaller than 30 minutes"))
+			if duration < core.MaintenanceTimeWindowDurationMinimum {
+				allErrs = append(allErrs, field.Forbidden(fldPath.Child("timeWindow"), fmt.Sprintf("time window must not be smaller than %s", core.MaintenanceTimeWindowDurationMinimum)))
 				return allErrs
 			}
 		}

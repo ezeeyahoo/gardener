@@ -7,10 +7,12 @@ global:
       app: fluent-bit
       role: logging
 
+authEnabled: true
+
 annotations: {}
 
 labels:
-  # depricated label only for the health check
+  # deprecated label only for the health check
   garden.sapcloud.io/role: logging
   gardener.cloud/role: logging
   app: loki
@@ -30,22 +32,22 @@ livenessProbe:
   httpGet:
     path: /ready
     port: metrics
-  initialDelaySeconds: 45
+  initialDelaySeconds: 120
 
 readinessProbe:
   httpGet:
     path: /ready
     port: metrics
-  initialDelaySeconds: 45
+  initialDelaySeconds: 120
 
 replicas: 1
 
 resources:
   limits:
-    cpu: 100m
-    memory: 256Mi
+    cpu: 450m
+    memory: 512Mi
   requests:
-    cpu: 20m
+    cpu: 200m
     memory: 64Mi
 
 securityContext:
@@ -57,3 +59,40 @@ securityContext:
 service:
   type: ClusterIP
   port: 3100
+
+
+hvpa:
+  enabled: false
+  maxAllowed:
+    cpu: 800m
+    memory: 2G
+  minAllowed:
+    cpu: 200m
+    memory: 64M
+  targetAverageUtilizationCpu: 80
+  targetAverageUtilizationMemory: 80
+  scaleUpStabilization:
+    stabilizationDuration: "5m"
+    minChange:
+      cpu:
+        value: "100m"
+        percentage: 80
+      memory:
+        value: 200M
+        percentage: 80
+  scaleDownStabilization:
+    stabilizationDuration: "15m"
+    minChange:
+      cpu:
+        value: "100m"
+        percentage: 80
+      memory:
+        value: 200M
+        percentage: 80
+  limitsRequestsGapScaleParams:
+    cpu:
+      value: "300m"
+      percentage: 40
+    memory:
+      value: "400M"
+      percentage: 40

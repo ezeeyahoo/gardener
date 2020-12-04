@@ -27,6 +27,7 @@ import (
 	"github.com/gardener/gardener/pkg/operation/common"
 	"github.com/gardener/gardener/pkg/utils"
 	kutil "github.com/gardener/gardener/pkg/utils/kubernetes"
+	"github.com/gardener/gardener/pkg/utils/managedresources"
 	"github.com/gardener/gardener/pkg/utils/secrets"
 
 	"github.com/Masterminds/semver"
@@ -37,8 +38,6 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apiserver/pkg/authentication/user"
@@ -56,7 +55,9 @@ const (
 	// SecretNameServer is the name of the kube-scheduler server certificate secret.
 	SecretNameServer = "kube-scheduler-server"
 
-	labelRole              = "scheduler"
+	// LabelRole is a constant for the value of a label with key 'role'.
+	LabelRole = "scheduler"
+
 	managedResourceName    = "shoot-core-kube-scheduler"
 	containerName          = v1beta1constants.DeploymentNameKubeScheduler
 	portNameMetrics        = "metrics"
@@ -126,13 +127,6 @@ func (k *kubeScheduler) Deploy(ctx context.Context) error {
 		service    = k.emptyService()
 		deployment = k.emptyDeployment()
 
-		labels = map[string]string{
-			v1beta1constants.LabelApp:  v1beta1constants.LabelKubernetes,
-			v1beta1constants.LabelRole: labelRole,
-		}
-		labelsWithControlPlaneRole = utils.MergeStringMaps(labels, map[string]string{
-			v1beta1constants.DeprecatedGardenRole: v1beta1constants.GardenRoleControlPlane,
-		})
 		vpaUpdateMode = autoscalingv1beta2.UpdateModeAuto
 
 		port           = k.computeServerPort()
@@ -154,8 +148,8 @@ func (k *kubeScheduler) Deploy(ctx context.Context) error {
 	}
 
 	if _, err := controllerutil.CreateOrUpdate(ctx, k.client, service, func() error {
-		service.Labels = labels
-		service.Spec.Selector = labels
+		service.Labels = getLabels()
+		service.Spec.Selector = getLabels()
 		service.Spec.Type = corev1.ServiceTypeClusterIP
 		service.Spec.Ports = kutil.ReconcileServicePorts(service.Spec.Ports, []corev1.ServicePort{
 			{
@@ -170,10 +164,13 @@ func (k *kubeScheduler) Deploy(ctx context.Context) error {
 	}
 
 	if _, err := controllerutil.CreateOrUpdate(ctx, k.client, deployment, func() error {
-		deployment.Labels = labelsWithControlPlaneRole
+		deployment.Labels = utils.MergeStringMaps(getLabels(), map[string]string{
+			v1beta1constants.GardenRole:           v1beta1constants.GardenRoleControlPlane,
+			v1beta1constants.DeprecatedGardenRole: v1beta1constants.GardenRoleControlPlane,
+		})
 		deployment.Spec.Replicas = &k.replicas
 		deployment.Spec.RevisionHistoryLimit = pointer.Int32Ptr(0)
-		deployment.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
+		deployment.Spec.Selector = &metav1.LabelSelector{MatchLabels: getLabels()}
 		deployment.Spec.Template = corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
@@ -181,7 +178,8 @@ func (k *kubeScheduler) Deploy(ctx context.Context) error {
 					"checksum/secret-" + k.secrets.Kubeconfig.Name: k.secrets.Kubeconfig.Checksum,
 					"checksum/secret-" + k.secrets.Server.Name:     k.secrets.Server.Checksum,
 				},
-				Labels: utils.MergeStringMaps(labelsWithControlPlaneRole, map[string]string{
+				Labels: utils.MergeStringMaps(getLabels(), map[string]string{
+					v1beta1constants.DeprecatedGardenRole:               v1beta1constants.GardenRoleControlPlane,
 					v1beta1constants.LabelPodMaintenanceRestart:         "true",
 					v1beta1constants.LabelNetworkPolicyToDNS:            v1beta1constants.LabelNetworkPolicyAllowed,
 					v1beta1constants.LabelNetworkPolicyToShootAPIServer: v1beta1constants.LabelNetworkPolicyAllowed,
@@ -295,6 +293,13 @@ func (k *kubeScheduler) Deploy(ctx context.Context) error {
 	return k.reconcileShootResources(ctx)
 }
 
+func getLabels() map[string]string {
+	return map[string]string{
+		v1beta1constants.LabelApp:  v1beta1constants.LabelKubernetes,
+		v1beta1constants.LabelRole: LabelRole,
+	}
+}
+
 func (k *kubeScheduler) Destroy(_ context.Context) error     { return nil }
 func (k *kubeScheduler) Wait(_ context.Context) error        { return nil }
 func (k *kubeScheduler) WaitCleanup(_ context.Context) error { return nil }
@@ -326,7 +331,11 @@ func (k *kubeScheduler) emptyManagedResourceSecret() *corev1.Secret {
 
 func (k *kubeScheduler) reconcileShootResources(ctx context.Context) error {
 	if versionConstraintK8sEqual113.Check(k.version) {
-		return common.DeployManagedResource(ctx, k.client, managedResourceName, k.namespace, false, k.computeShootResourcesData())
+		data, err := k.computeShootResourcesData()
+		if err != nil {
+			return err
+		}
+		return common.DeployManagedResourceForShoot(ctx, k.client, managedResourceName, k.namespace, false, data)
 	}
 
 	return kutil.DeleteObjects(ctx, k.client, k.emptyManagedResource(), k.emptyManagedResourceSecret())
@@ -412,10 +421,9 @@ func (k *kubeScheduler) computeCommand(port int32) []string {
 	return command
 }
 
-func (k *kubeScheduler) computeShootResourcesData() map[string][]byte {
+func (k *kubeScheduler) computeShootResourcesData() (map[string][]byte, error) {
 	var (
-		versions = schema.GroupVersions([]schema.GroupVersion{rbacv1.SchemeGroupVersion})
-		codec    = kubernetes.ShootCodec.CodecForVersions(kubernetes.ShootSerializer, kubernetes.ShootSerializer, versions, versions)
+		registry = managedresources.NewRegistry(kubernetes.ShootScheme, kubernetes.ShootCodec, kubernetes.ShootSerializer)
 
 		subjects = []rbacv1.Subject{{
 			Kind: rbacv1.UserKind,
@@ -433,7 +441,6 @@ func (k *kubeScheduler) computeShootResourcesData() map[string][]byte {
 			},
 			Subjects: subjects,
 		}
-		clusterRoleBindingYAML, _ = runtime.Encode(codec, clusterRoleBinding)
 
 		roleBinding = &rbacv1.RoleBinding{
 			ObjectMeta: metav1.ObjectMeta{
@@ -447,13 +454,12 @@ func (k *kubeScheduler) computeShootResourcesData() map[string][]byte {
 			},
 			Subjects: subjects,
 		}
-		roleBindingYAML, _ = runtime.Encode(codec, roleBinding)
 	)
 
-	return map[string][]byte{
-		"clusterrolebinding.yaml": clusterRoleBindingYAML,
-		"rolebinding.yaml":        roleBindingYAML,
-	}
+	return registry.AddAllAndSerialize(
+		clusterRoleBinding,
+		roleBinding,
+	)
 }
 
 var (

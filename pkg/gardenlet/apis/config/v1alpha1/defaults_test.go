@@ -15,6 +15,9 @@
 package v1alpha1_test
 
 import (
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog"
 
 	. "github.com/gardener/gardener/pkg/gardenlet/apis/config/v1alpha1"
@@ -33,7 +36,7 @@ var _ = Describe("Defaults", func() {
 		})
 
 		It("should default the gardenlet configuration", func() {
-			SetDefaults_GardenletConfiguration(obj)
+			SetObjectDefaults_GardenletConfiguration(obj)
 
 			Expect(obj.GardenClientConnection).NotTo(BeNil())
 			Expect(obj.SeedClientConnection).NotTo(BeNil())
@@ -47,11 +50,50 @@ var _ = Describe("Defaults", func() {
 			Expect(obj.Controllers.Shoot).NotTo(BeNil())
 			Expect(obj.Controllers.ShootCare).NotTo(BeNil())
 			Expect(obj.Controllers.ShootStateSync).NotTo(BeNil())
+			Expect(obj.Controllers.ShootedSeedRegistration).NotTo(BeNil())
 			Expect(obj.LeaderElection).NotTo(BeNil())
 			Expect(obj.LogLevel).To(PointTo(Equal("info")))
 			Expect(obj.KubernetesLogLevel).To(PointTo(Equal(klog.Level(0))))
 			Expect(obj.Server.HTTPS.BindAddress).To(Equal("0.0.0.0"))
 			Expect(obj.Server.HTTPS.Port).To(Equal(2720))
+			Expect(obj.SNI).ToNot(BeNil())
+			Expect(obj.SNI.Ingress).ToNot(BeNil())
+			Expect(obj.SNI.Ingress.Labels).To(Equal(map[string]string{"istio": "ingressgateway"}))
+			Expect(obj.SNI.Ingress.Namespace).To(PointTo(Equal("istio-ingress")))
+			Expect(obj.SNI.Ingress.ServiceName).To(PointTo(Equal("istio-ingressgateway")))
+		})
+	})
+
+	Describe("#SetDefaults_ShootedSeedRegistrationControllerConfiguration", func() {
+		var obj *ShootedSeedRegistrationControllerConfiguration
+
+		BeforeEach(func() {
+			obj = &ShootedSeedRegistrationControllerConfiguration{}
+		})
+
+		It("should default the configuration", func() {
+			SetDefaults_ShootedSeedRegistrationControllerConfiguration(obj)
+
+			Expect(obj.SyncJitterPeriod).To(PointTo(Equal(metav1.Duration{Duration: 5 * time.Minute})))
+		})
+	})
+
+	Describe("#SetDefaults_ShootControllerConfiguration", func() {
+		var obj *ShootControllerConfiguration
+
+		BeforeEach(func() {
+			obj = &ShootControllerConfiguration{}
+		})
+
+		It("should default the configuration", func() {
+			SetDefaults_ShootControllerConfiguration(obj)
+
+			Expect(obj.ConcurrentSyncs).To(PointTo(Equal(20)))
+			Expect(obj.SyncPeriod).To(PointTo(Equal(metav1.Duration{Duration: time.Hour})))
+			Expect(obj.RespectSyncPeriodOverwrite).To(PointTo(Equal(false)))
+			Expect(obj.ReconcileInMaintenanceOnly).To(PointTo(Equal(false)))
+			Expect(obj.RetryDuration).To(PointTo(Equal(metav1.Duration{Duration: 12 * time.Hour})))
+			Expect(obj.DNSEntryTTLSeconds).To(PointTo(Equal(int64(120))))
 		})
 	})
 })

@@ -21,6 +21,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
@@ -31,26 +32,30 @@ import (
 	"github.com/gardener/gardener/pkg/client/kubernetes/clientmap"
 	"github.com/gardener/gardener/pkg/client/kubernetes/clientmap/keys"
 	"github.com/gardener/gardener/pkg/controllerutils"
+	"github.com/gardener/gardener/pkg/features"
 	"github.com/gardener/gardener/pkg/gardenlet/apis/config"
 	configv1alpha1 "github.com/gardener/gardener/pkg/gardenlet/apis/config/v1alpha1"
 	bootstraputil "github.com/gardener/gardener/pkg/gardenlet/bootstrap/util"
+	gardenletfeatures "github.com/gardener/gardener/pkg/gardenlet/features"
 	"github.com/gardener/gardener/pkg/logger"
 	"github.com/gardener/gardener/pkg/operation/common"
 	"github.com/gardener/gardener/pkg/utils"
 	"github.com/gardener/gardener/pkg/utils/imagevector"
 	kutil "github.com/gardener/gardener/pkg/utils/kubernetes"
+	"github.com/gardener/gardener/pkg/utils/secrets"
 	"github.com/gardener/gardener/pkg/version"
 
+	"github.com/Masterminds/semver"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -61,7 +66,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-func (c *Controller) seedRegistrationAdd(obj interface{}) {
+var minimumAPIServerSNISidecarConstraint *semver.Constraints
+
+func init() {
+	var err error
+	// 1.13.0-0 must be used or no 1.13.0-dev version can be matched
+	minimumAPIServerSNISidecarConstraint, err = semver.NewConstraint(">= 1.13.0-0")
+	utilruntime.Must(err)
+}
+
+func (c *Controller) seedRegistrationAdd(obj interface{}, immediately bool) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		return
@@ -74,7 +88,17 @@ func (c *Controller) seedRegistrationAdd(obj interface{}) {
 		return
 	}
 
-	c.seedRegistrationQueue.Add(key)
+	if immediately {
+		logger.Logger.Infof("Added shooted seed %q without delay to the registration queue", key)
+		c.seedRegistrationQueue.Add(key)
+	} else {
+		// spread registration of shooted seeds (including gardenlet updates/rollouts) across the configured sync jitter
+		// period to avoid overloading the gardener-apiserver if all gardenlets in all shooted seeds are (re)starting
+		// roughly at the same time
+		duration := utils.RandomDurationWithMetaDuration(c.config.Controllers.ShootedSeedRegistration.SyncJitterPeriod)
+		logger.Logger.Infof("Added shooted seed %q with delay %s to the registration queue", key, duration)
+		c.seedRegistrationQueue.AddAfter(key, duration)
+	}
 }
 
 func (c *Controller) seedRegistrationUpdate(oldObj, newObj interface{}) {
@@ -87,11 +111,12 @@ func (c *Controller) seedRegistrationUpdate(oldObj, newObj interface{}) {
 		return
 	}
 
-	if newShoot.Generation == newShoot.Status.ObservedGeneration && apiequality.Semantic.DeepEqual(newShoot.Annotations, oldShoot.Annotations) {
+	if newShoot.Generation == newShoot.Status.ObservedGeneration &&
+		newShoot.Annotations[v1beta1constants.AnnotationShootUseAsSeed] == oldShoot.Annotations[v1beta1constants.AnnotationShootUseAsSeed] {
 		return
 	}
 
-	c.seedRegistrationAdd(newObj)
+	c.seedRegistrationAdd(newObj, true)
 }
 
 func (c *Controller) reconcileShootedSeedRegistrationKey(req reconcile.Request) (reconcile.Result, error) {
@@ -331,8 +356,9 @@ func prepareSeedConfig(ctx context.Context, gardenClient client.Client, seedClie
 
 	return &gardencorev1beta1.SeedSpec{
 		Provider: gardencorev1beta1.SeedProvider{
-			Type:   shoot.Spec.Provider.Type,
-			Region: shoot.Spec.Region,
+			Type:           shoot.Spec.Provider.Type,
+			Region:         shoot.Spec.Region,
+			ProviderConfig: shootedSeedConfig.SeedProviderConfig,
 		},
 		DNS: gardencorev1beta1.SeedDNS{
 			IngressDomain: fmt.Sprintf("%s.%s", common.IngressPrefix, *(shoot.Spec.DNS.Domain)),
@@ -391,8 +417,7 @@ func registerAsSeed(ctx context.Context, gardenClient client.Client, seedClient 
 
 	_, err = controllerutil.CreateOrUpdate(ctx, gardenClient, seed, func() error {
 		seed.Labels = utils.MergeStringMaps(shoot.Labels, map[string]string{
-			v1beta1constants.DeprecatedGardenRole: v1beta1constants.GardenRoleSeed,
-			v1beta1constants.GardenRole:           v1beta1constants.GardenRoleSeed,
+			v1beta1constants.GardenRole: v1beta1constants.GardenRoleSeed,
 		})
 		seed.Spec = *seedSpec
 		return nil
@@ -618,11 +643,7 @@ func deployGardenlet(ctx context.Context, gardenClient, seedClient, shootedSeedC
 		tag = *gardenletImage.Tag
 	}
 
-	serverTLSCertificate, err := ioutil.ReadFile(externalConfig.Server.HTTPS.TLS.ServerCertPath)
-	if err != nil {
-		return err
-	}
-	serverTLSKey, err := ioutil.ReadFile(externalConfig.Server.HTTPS.TLS.ServerKeyPath)
+	serverConfig, err := computeServerConfig(externalConfig.Server)
 	if err != nil {
 		return err
 	}
@@ -636,6 +657,23 @@ func deployGardenlet(ctx context.Context, gardenClient, seedClient, shootedSeedC
 		}
 	}
 
+	featureGates := externalConfig.FeatureGates
+	if featureGates == nil {
+		featureGates = shootedSeedConfig.FeatureGates
+	} else {
+		for feature, enabled := range shootedSeedConfig.FeatureGates {
+			featureGates[feature] = enabled
+		}
+	}
+
+	resources := externalConfig.Resources
+	if shootedSeedConfig.Resources != nil {
+		resources = &configv1alpha1.ResourcesConfiguration{
+			Capacity: shootedSeedConfig.Resources.Capacity,
+			Reserved: shootedSeedConfig.Resources.Reserved,
+		}
+	}
+
 	values := map[string]interface{}{
 		"global": map[string]interface{}{
 			"gardenlet": map[string]interface{}{
@@ -643,6 +681,7 @@ func deployGardenlet(ctx context.Context, gardenClient, seedClient, shootedSeedC
 					"repository": repository,
 					"tag":        tag,
 				},
+				"podAnnotations":                 gardenletAnnotations(shoot),
 				"revisionHistoryLimit":           0,
 				"vpa":                            true,
 				"imageVectorOverwrite":           imageVectorOverwrite,
@@ -663,20 +702,12 @@ func deployGardenlet(ctx context.Context, gardenClient, seedClient, shootedSeedC
 					"seedClientConnection":  externalConfig.SeedClientConnection.ClientConnectionConfiguration,
 					"shootClientConnection": externalConfig.ShootClientConnection,
 					"controllers":           externalConfig.Controllers,
+					"resources":             resources,
 					"leaderElection":        externalConfig.LeaderElection,
 					"logLevel":              externalConfig.LogLevel,
 					"kubernetesLogLevel":    externalConfig.KubernetesLogLevel,
-					"featureGates":          externalConfig.FeatureGates,
-					"server": map[string]interface{}{
-						"https": map[string]interface{}{
-							"bindAddress": externalConfig.Server.HTTPS.BindAddress,
-							"port":        externalConfig.Server.HTTPS.Port,
-							"tls": map[string]interface{}{
-								"crt": string(serverTLSCertificate),
-								"key": string(serverTLSKey),
-							},
-						},
-					},
+					"featureGates":          featureGates,
+					"server":                serverConfig,
 					"seedConfig": &configv1alpha1.SeedConfig{
 						Seed: gardencorev1beta1.Seed{
 							ObjectMeta: metav1.ObjectMeta{
@@ -758,4 +789,58 @@ func mustEnableVPA(ctx context.Context, c client.Client, shoot *gardencorev1beta
 
 	// VPA deployment in shoot namespace was found, so we don't need to enable the VPA for this seed.
 	return false, nil
+}
+
+func computeServerConfig(serverConfig *configv1alpha1.ServerConfiguration) (map[string]interface{}, error) {
+	tlsConfig := make(map[string]interface{}, 2)
+	if serverConfig != nil && serverConfig.HTTPS.TLS != nil {
+		if !strings.Contains(serverConfig.HTTPS.TLS.ServerCertPath, secrets.TemporaryDirectoryForSelfGeneratedTLSCertificatesPattern) {
+			serverTLSCertificate, err := ioutil.ReadFile(serverConfig.HTTPS.TLS.ServerCertPath)
+			if err != nil {
+				return nil, err
+			}
+			tlsConfig["crt"] = string(serverTLSCertificate)
+		}
+
+		if !strings.Contains(serverConfig.HTTPS.TLS.ServerKeyPath, secrets.TemporaryDirectoryForSelfGeneratedTLSCertificatesPattern) {
+			serverTLSKey, err := ioutil.ReadFile(serverConfig.HTTPS.TLS.ServerKeyPath)
+			if err != nil {
+				return nil, err
+			}
+			tlsConfig["key"] = string(serverTLSKey)
+		}
+	}
+
+	httpsConfig := map[string]interface{}{
+		"bindAddress": serverConfig.HTTPS.BindAddress,
+		"port":        serverConfig.HTTPS.Port,
+	}
+	if len(tlsConfig) > 0 {
+		httpsConfig["tls"] = tlsConfig
+	}
+
+	return map[string]interface{}{
+		"https": httpsConfig,
+	}, nil
+}
+
+func gardenletAnnotations(shoot *gardencorev1beta1.Shoot) map[string]string {
+	var gardenletAnnotations map[string]string
+
+	// if APIServerSNI is enabled for the Seed cluster then
+	// the gardenlet must be restarted, so the Pod injector would
+	// add `KUBERNETES_SERVICE_HOST` environment variable.
+	if gardenletfeatures.FeatureGate.Enabled(features.APIServerSNI) {
+		vers, err := semver.NewVersion(shoot.Status.Gardener.Version)
+		// We can't really do anything in case of error - it is not a transient error.
+		// Throwing error would force another reconciliation that would fail again here.
+		// Reconciling from this point makes no sense, unless the Shoot is updated.
+		if err == nil && vers != nil && minimumAPIServerSNISidecarConstraint.Check(vers) {
+			gardenletAnnotations = map[string]string{
+				"networking.gardener.cloud/seed-sni-enabled": "true",
+			}
+		}
+	}
+
+	return gardenletAnnotations
 }

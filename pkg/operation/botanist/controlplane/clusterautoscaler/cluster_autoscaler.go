@@ -27,6 +27,7 @@ import (
 	"github.com/gardener/gardener/pkg/operation/common"
 	"github.com/gardener/gardener/pkg/utils"
 	kutil "github.com/gardener/gardener/pkg/utils/kubernetes"
+	"github.com/gardener/gardener/pkg/utils/managedresources"
 	"github.com/gardener/gardener/pkg/utils/secrets"
 
 	resourcesv1alpha1 "github.com/gardener/gardener-resource-manager/pkg/apis/resources/v1alpha1"
@@ -37,8 +38,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	autoscalingv1beta2 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1beta2"
 	"k8s.io/utils/pointer"
@@ -116,14 +115,6 @@ func (c *clusterAutoscaler) Deploy(ctx context.Context) error {
 		service            = c.emptyService()
 		deployment         = c.emptyDeployment()
 
-		labels = map[string]string{
-			v1beta1constants.LabelApp:  v1beta1constants.LabelKubernetes,
-			v1beta1constants.LabelRole: v1beta1constants.DeploymentNameClusterAutoscaler,
-		}
-		labelsWithControlPlaneRole = utils.MergeStringMaps(labels, map[string]string{
-			v1beta1constants.DeprecatedGardenRole: v1beta1constants.GardenRoleControlPlane,
-		})
-
 		vpaUpdateMode = autoscalingv1beta2.UpdateModeAuto
 		command       = c.computeCommand()
 	)
@@ -157,8 +148,8 @@ func (c *clusterAutoscaler) Deploy(ctx context.Context) error {
 	}
 
 	if _, err := controllerutil.CreateOrUpdate(ctx, c.client, service, func() error {
-		service.Labels = labels
-		service.Spec.Selector = labels
+		service.Labels = getLabels()
+		service.Spec.Selector = getLabels()
 		service.Spec.Type = corev1.ServiceTypeClusterIP
 		service.Spec.ClusterIP = corev1.ClusterIPNone
 		service.Spec.Ports = kutil.ReconcileServicePorts(service.Spec.Ports, []corev1.ServicePort{
@@ -174,16 +165,20 @@ func (c *clusterAutoscaler) Deploy(ctx context.Context) error {
 	}
 
 	if _, err := controllerutil.CreateOrUpdate(ctx, c.client, deployment, func() error {
-		deployment.Labels = labelsWithControlPlaneRole
+		deployment.Labels = utils.MergeStringMaps(getLabels(), map[string]string{
+			v1beta1constants.GardenRole:           v1beta1constants.GardenRoleControlPlane,
+			v1beta1constants.DeprecatedGardenRole: v1beta1constants.GardenRoleControlPlane,
+		})
 		deployment.Spec.Replicas = &c.replicas
 		deployment.Spec.RevisionHistoryLimit = pointer.Int32Ptr(0)
-		deployment.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
+		deployment.Spec.Selector = &metav1.LabelSelector{MatchLabels: getLabels()}
 		deployment.Spec.Template = corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
 					"checksum/secret-" + c.secrets.Kubeconfig.Name: c.secrets.Kubeconfig.Checksum,
 				},
-				Labels: utils.MergeStringMaps(labelsWithControlPlaneRole, map[string]string{
+				Labels: utils.MergeStringMaps(getLabels(), map[string]string{
+					v1beta1constants.DeprecatedGardenRole:               v1beta1constants.GardenRoleControlPlane,
 					v1beta1constants.LabelNetworkPolicyToDNS:            v1beta1constants.LabelNetworkPolicyAllowed,
 					v1beta1constants.LabelNetworkPolicyToShootAPIServer: v1beta1constants.LabelNetworkPolicyAllowed,
 					v1beta1constants.LabelNetworkPolicyToSeedAPIServer:  v1beta1constants.LabelNetworkPolicyAllowed,
@@ -261,12 +256,35 @@ func (c *clusterAutoscaler) Deploy(ctx context.Context) error {
 		vpa.Spec.UpdatePolicy = &autoscalingv1beta2.PodUpdatePolicy{
 			UpdateMode: &vpaUpdateMode,
 		}
+		vpa.Spec.ResourcePolicy = &autoscalingv1beta2.PodResourcePolicy{
+			ContainerPolicies: []autoscalingv1beta2.ContainerResourcePolicy{
+				{
+					ContainerName: autoscalingv1beta2.DefaultContainerResourcePolicy,
+					MinAllowed: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("20m"),
+						corev1.ResourceMemory: resource.MustParse("50Mi"),
+					},
+				},
+			},
+		}
 		return nil
 	}); err != nil {
 		return err
 	}
 
-	return common.DeployManagedResource(ctx, c.client, managedResourceTargetName, c.namespace, false, c.computeShootResourcesData())
+	data, err := c.computeShootResourcesData()
+	if err != nil {
+		return err
+	}
+
+	return common.DeployManagedResourceForShoot(ctx, c.client, managedResourceTargetName, c.namespace, false, data)
+}
+
+func getLabels() map[string]string {
+	return map[string]string{
+		v1beta1constants.LabelApp:  v1beta1constants.LabelKubernetes,
+		v1beta1constants.LabelRole: v1beta1constants.DeploymentNameClusterAutoscaler,
+	}
 }
 
 func (c *clusterAutoscaler) Destroy(ctx context.Context) error {
@@ -372,10 +390,9 @@ func (c *clusterAutoscaler) computeCommand() []string {
 	return command
 }
 
-func (c *clusterAutoscaler) computeShootResourcesData() map[string][]byte {
+func (c *clusterAutoscaler) computeShootResourcesData() (map[string][]byte, error) {
 	var (
-		versions = schema.GroupVersions([]schema.GroupVersion{rbacv1.SchemeGroupVersion})
-		codec    = kubernetes.ShootCodec.CodecForVersions(kubernetes.ShootSerializer, kubernetes.ShootSerializer, versions, versions)
+		registry = managedresources.NewRegistry(kubernetes.ShootScheme, kubernetes.ShootCodec, kubernetes.ShootSerializer)
 
 		clusterRole = &rbacv1.ClusterRole{
 			ObjectMeta: metav1.ObjectMeta{
@@ -457,7 +474,6 @@ func (c *clusterAutoscaler) computeShootResourcesData() map[string][]byte {
 				},
 			},
 		}
-		clusterRoleYAML, _ = runtime.Encode(codec, clusterRole)
 
 		clusterRoleBinding = &rbacv1.ClusterRoleBinding{
 			ObjectMeta: metav1.ObjectMeta{
@@ -473,13 +489,12 @@ func (c *clusterAutoscaler) computeShootResourcesData() map[string][]byte {
 				Name: UserName,
 			}},
 		}
-		clusterRoleBindingYAML, _ = runtime.Encode(codec, clusterRoleBinding)
 	)
 
-	return map[string][]byte{
-		"clusterrole.yaml":        clusterRoleYAML,
-		"clusterrolebinding.yaml": clusterRoleBindingYAML,
-	}
+	return registry.AddAllAndSerialize(
+		clusterRole,
+		clusterRoleBinding,
+	)
 }
 
 // Secrets is collection of secrets for the cluster-autoscaler.

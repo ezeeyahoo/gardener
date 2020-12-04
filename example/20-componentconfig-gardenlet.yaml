@@ -43,6 +43,7 @@ controllers:
 #   reconcileInMaintenanceOnly: true
   # `progressReportPeriod` specifies how often the progress of a shoot operation shall be reported in its status.
 #   progressReportPeriod: 5s
+#   dnsEntryTTLSeconds: 120
   shootCare:
     concurrentSyncs: 5
     syncPeriod: 30s
@@ -59,9 +60,14 @@ controllers:
   shootStateSync:
     concurrentSyncs: 1
     syncPeriod: 30s
+  shootedSeedRegistration:
+    syncJitterPeriod: 5m
   seed:
     concurrentSyncs: 5
     syncPeriod: 1m
+resources:
+  capacity:
+    shoots: 200
 leaderElection:
   leaderElect: true
   leaseDuration: 15s
@@ -99,3 +105,9 @@ seedSelector: {} # selects all seeds, only use for development purposes
 #     output: |-
 #       [Output]
 #           ...
+# sni: # SNI configuration used for APIServerSNI and ManagedIstio feature gates with default values.
+#   ingress:
+#     serviceName: istio-ingress
+#     namespace: istio-ingress
+#     labels:
+#       istio: ingressgateway

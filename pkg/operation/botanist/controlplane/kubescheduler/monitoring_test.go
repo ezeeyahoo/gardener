@@ -15,6 +15,8 @@
 package kubescheduler_test
 
 import (
+	"path/filepath"
+
 	"github.com/Masterminds/semver"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
@@ -31,7 +33,7 @@ var _ = Describe("Monitoring", func() {
 			Expect(err).NotTo(HaveOccurred())
 			kubeScheduler := New(nil, "", semverVersion, "", 0, nil)
 
-			test.ScapeConfigs(kubeScheduler, expectedScrapeConfig)
+			test.ScrapeConfigs(kubeScheduler, expectedScrapeConfig)
 		},
 
 		Entry("kubernetes 1.10", "1.10.0", expectedScrapeConfigK8sLess113),
@@ -54,7 +56,7 @@ var _ = Describe("Monitoring", func() {
 		test.AlertingRulesWithPromtool(
 			kubeScheduler,
 			map[string]string{"kube-scheduler.rules.yaml": expectedAlertingRule},
-			"monitoring_alertingrules.test.yaml",
+			filepath.Join("testdata", "monitoring_alertingrules.yaml"),
 		)
 	})
 })

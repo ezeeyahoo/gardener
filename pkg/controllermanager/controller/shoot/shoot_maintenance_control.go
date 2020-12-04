@@ -112,7 +112,7 @@ func (c *Controller) shootMaintenanceRequeue(key string, shoot *gardencorev1beta
 	var (
 		now             = time.Now()
 		window          = common.EffectiveShootMaintenanceTimeWindow(shoot)
-		duration        = window.RandomDurationUntilNext(now)
+		duration        = window.RandomDurationUntilNext(now, false)
 		nextMaintenance = time.Now().UTC().Add(duration)
 	)
 
@@ -195,9 +195,7 @@ func (c *defaultMaintenanceControl) Maintain(shootObj *gardencorev1beta1.Shoot, 
 			metav1.SetMetaDataAnnotation(&s.ObjectMeta, v1beta1constants.GardenerOperation, common.ShootOperationRetry)
 		}
 
-		if !gardencorev1beta1helper.HibernationIsEnabled(s) {
-			controllerutils.AddTasks(s.Annotations, common.ShootTaskDeployInfrastructure)
-		}
+		controllerutils.AddTasks(s.Annotations, common.ShootTaskDeployInfrastructure)
 		if utils.IsTrue(c.config.EnableShootControlPlaneRestarter) {
 			controllerutils.AddTasks(s.Annotations, common.ShootTaskRestartControlPlanePods)
 		}

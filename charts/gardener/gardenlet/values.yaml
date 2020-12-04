@@ -79,6 +79,7 @@ global:
           respectSyncPeriodOverwrite: false
           reconcileInMaintenanceOnly: false
         # progressReportPeriod: 5s
+        # dnsEntryTTLSeconds: 120
         shootCare:
           concurrentSyncs: 5
           syncPeriod: 30s
@@ -94,6 +95,11 @@ global:
         shootStateSync:
           concurrentSyncs: 5
           syncPeriod: 30s
+        shootedSeedRegistration:
+          syncJitterPeriod: 5m
+      resources:
+        capacity:
+          shoots: 250
       leaderElection:
         leaderElect: true
         leaseDuration: 15s
@@ -117,6 +123,13 @@ global:
         #     ...
         #     -----END RSA PRIVATE KEY-----
       featureGates: {}
+      # sni: # SNI configuration used for APIServerSNI and ManagedIstio feature gates.
+      #   ingress:
+      #     serviceName: istio-ingress
+      #     namespace: istio-ingress
+      #     labels:
+      #       istio: ingressgateway
+
     # seedSelector: {}
     # seedConfig: {}
     # logging:

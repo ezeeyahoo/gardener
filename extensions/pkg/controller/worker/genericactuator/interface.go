@@ -26,15 +26,20 @@ import (
 
 // WorkerDelegate is used for the Worker reconciliation.
 type WorkerDelegate interface {
-	// GetMachineControllerManagerChart should return the the chart and the values for the machine-controller-manager
+	// GetMachineControllerManagerChartValues should return the the chart and the values for the machine-controller-manager
 	// deployment.
 	GetMachineControllerManagerChartValues(context.Context) (map[string]interface{}, error)
-	// GetMachineControllerManagerShootChart should return the values to render the chart containing resources
+	// GetMachineControllerManagerShootChartValues should return the values to render the chart containing resources
 	// that are required by the machine-controller-manager inside the shoot cluster itself.
 	GetMachineControllerManagerShootChartValues(context.Context) (map[string]interface{}, error)
+	// GetMachineControllerManagerCloudCredentials should return the IaaS credentials
+	// with the secret keys used by the machine-controller-manager.
+	GetMachineControllerManagerCloudCredentials(context.Context) (map[string][]byte, error)
 
 	// MachineClassKind yields the name of the provider specific machine class.
 	MachineClassKind() string
+	// MachineClass yields a newly initialized machine class object.
+	MachineClass() runtime.Object
 	// MachineClassList yields a newly initialized machine class list object.
 	MachineClassList() runtime.Object
 	// DeployMachineClasses generates and creates the provider specific machine classes.

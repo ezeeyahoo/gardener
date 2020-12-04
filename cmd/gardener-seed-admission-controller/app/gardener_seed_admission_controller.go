@@ -25,13 +25,17 @@ import (
 
 	"github.com/gardener/gardener/pkg/client/kubernetes"
 	gardenerlogger "github.com/gardener/gardener/pkg/logger"
+	"github.com/gardener/gardener/pkg/operation/seed/scheduler"
 	"github.com/gardener/gardener/pkg/seedadmission"
+	"github.com/gardener/gardener/pkg/version/verflag"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"gomodules.xyz/jsonpatch/v2"
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
 	admissionregistrationv1beta1 "k8s.io/api/admissionregistration/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -102,6 +106,8 @@ func NewCommandStartGardenerSeedAdmissionController(ctx context.Context) *cobra.
 		Short: "Launch the Gardener seed admission controller",
 		Long:  `The Gardener seed admission controller serves a validation webhook endpoint for resources in the seed clusters.`,
 		Run: func(cmd *cobra.Command, args []string) {
+			verflag.PrintAndExitIfRequested()
+
 			utilruntime.Must(opts.validate(args))
 
 			logger.Infof("Starting Gardener seed admission controller...")
@@ -113,7 +119,9 @@ func NewCommandStartGardenerSeedAdmissionController(ctx context.Context) *cobra.
 		},
 	}
 
-	opts.AddFlags(cmd.Flags())
+	flags := cmd.Flags()
+	verflag.AddFlags(flags)
+	opts.AddFlags(flags)
 	return cmd
 }
 
@@ -137,9 +145,16 @@ func run(ctx context.Context, bindAddress string, port int, certPath, keyPath, k
 	seedAdmissionController := &GardenerSeedAdmissionController{
 		deserializer,
 		k8sClient.DirectClient(),
+		metav1.GroupVersionKind{Group: "", Kind: "Pod", Version: "v1"},
 	}
 
 	mux.HandleFunc("/webhooks/validate-extension-crd-deletion", seedAdmissionController.validateExtensionCRDDeletion)
+	mux.HandleFunc(
+		// in the future we might want to have additional scheduler names
+		// so lets have the handler be of pattern "/webhooks/default-pod-scheduler-name/{scheduler-name}"
+		fmt.Sprintf("/webhooks/default-pod-scheduler-name/%s", scheduler.GardenerShootControlPlaneSchedulerName),
+		seedAdmissionController.defaultShootControlPlanePodsSchedulerName,
+	)
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", bindAddress, port),
@@ -184,6 +199,7 @@ func respond(w http.ResponseWriter, request *admission.Request, response admissi
 type GardenerSeedAdmissionController struct {
 	codecs runtime.Decoder
 	client client.Client
+	podGVK metav1.GroupVersionKind
 }
 
 func (g *GardenerSeedAdmissionController) handleAdmissionReview(w http.ResponseWriter, r *http.Request) (admissionv1beta1.AdmissionReview, error) {
@@ -248,4 +264,36 @@ func (g *GardenerSeedAdmissionController) validateExtensionCRDDeletion(w http.Re
 	}
 
 	respond(w, nil, admission.Allowed(""))
+}
+
+// defaultShootControlPlanePodsSchedulerName sets "gardener-shoot-controlplane-scheduler"
+// as schedulerName on Pods.
+func (g *GardenerSeedAdmissionController) defaultShootControlPlanePodsSchedulerName(w http.ResponseWriter, r *http.Request) {
+	receivedReview, err := g.handleAdmissionReview(w, r)
+	if err != nil {
+		return
+	}
+
+	// If the request does not indicate the correct operation (CREATE) we allow the review without further doing.
+	if receivedReview.Request.Operation != admissionv1beta1.Create {
+		respond(w, nil, admission.Allowed("operation is no CREATE operation"))
+		return
+	}
+
+	if receivedReview.Request.Kind != g.podGVK {
+		respond(w, nil, admission.Allowed("requested resource is not a pod"))
+		return
+	}
+
+	if receivedReview.Request.SubResource != "" {
+		respond(w, nil, admission.Allowed("subresources on pods are not supported"))
+		return
+	}
+
+	resp := admission.Allowed("")
+	resp.Patches = []jsonpatch.Operation{
+		jsonpatch.NewPatch("replace", "/spec/schedulerName", scheduler.GardenerShootControlPlaneSchedulerName),
+	}
+
+	respond(w, &admission.Request{AdmissionRequest: *receivedReview.Request}, resp)
 }

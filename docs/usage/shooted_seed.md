@@ -51,7 +51,7 @@ Create shooted seed cluster with the `shoot.gardener.cloud/use-as-seed` annotati
 
 Option | Description
 --- | ---
-`true` | Deploys the gardenlet into the shoot cluster which automatically registers the cluster as seed cluster.
+`true` | Registers the cluster as a seed cluster. Automatically deploys the gardenlet into the shoot cluster, unless specified otherwise (e.g. setting the `no-gardenlet` flag).
 `no-gardenlet` | Prevents the automatic deployment of the gardenlet into the shoot cluster. Instead, the `Seed` object will be created with the assumption that another gardenlet will be responsible for managing it (according to its `seedSelector` configuration).
 `disable-capacity-reservation` | Set `spec.settings.excessCapacity.enabled` in the seed cluster to false (see [/example/50-seed.yaml](../../example/50-seed.yaml)).
 `invisible` | Set `spec.settings.scheduling.visible` in the seed cluster to false  (see [/example/50-seed.yaml](../../example/50-seed.yaml))
@@ -72,3 +72,8 @@ Option | Description
 `apiServer.autoscaler.maxReplicas` | Controls the maximum number of `kube-apiserver` replicas for the shooted seed cluster.
 `apiServer.replicas` | Controls how many `kube-apiserver` replicas the shooted seed cluster gets by default.
 `use-serviceaccount-bootstrapping` | States that the gardenlet registers with the garden cluster using a temporary `ServiceAccount` instead of a `CertificateSigningRequest` (**default**)
+`providerConfig.*` | Sets `providerConfig` configuration parameters of the Seed resource. Each parameter is specified via its path, e.g. `providerConfig.param1=foo` or `providerConfig.sublevel1.sublevel2.param3=bar`
+`featureGates.*={true,false}` | Overwrites the `.featureGates` in the gardenlet configuration (only applicable when the `no-gardenlet` setting is **not** set), e.g. `featureGates.APIServerSNI=true`
+`resources.capacity.*` | Overwrites the `resources.capacity` field in the gardenlet configuration (only applicable when the `no-gardenlet` setting is **not** set), e.g. `resources.capacity.shoots=250`
+`resources.reserved.*` | Overwrites the `resources.reserved` field in the gardenlet configuration (only applicable when the `no-gardenlet` setting is **not** set), e.g. `resources.reserved.foo=42`
+

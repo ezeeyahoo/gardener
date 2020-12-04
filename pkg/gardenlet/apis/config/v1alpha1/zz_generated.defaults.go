@@ -74,11 +74,20 @@ func SetObjectDefaults_GardenletConfiguration(in *GardenletConfiguration) {
 		if in.Controllers.ShootStateSync != nil {
 			SetDefaults_ShootStateSyncControllerConfiguration(in.Controllers.ShootStateSync)
 		}
+		if in.Controllers.ShootedSeedRegistration != nil {
+			SetDefaults_ShootedSeedRegistrationControllerConfiguration(in.Controllers.ShootedSeedRegistration)
+		}
 		if in.Controllers.SeedAPIServerNetworkPolicy != nil {
 			SetDefaults_SeedAPIServerNetworkPolicyControllerConfiguration(in.Controllers.SeedAPIServerNetworkPolicy)
 		}
 	}
 	if in.LeaderElection != nil {
 		SetDefaults_LeaderElectionConfiguration(in.LeaderElection)
+	}
+	if in.SNI != nil {
+		SetDefaults_SNI(in.SNI)
+		if in.SNI.Ingress != nil {
+			SetDefaults_SNIIngress(in.SNI.Ingress)
+		}
 	}
 }

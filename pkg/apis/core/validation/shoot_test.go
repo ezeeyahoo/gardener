@@ -34,10 +34,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/utils/pointer"
 
 	"github.com/gardener/gardener/pkg/apis/core"
 	. "github.com/gardener/gardener/pkg/apis/core/validation"
+	"github.com/gardener/gardener/pkg/features"
+	"github.com/gardener/gardener/pkg/utils/test"
 	. "github.com/gardener/gardener/pkg/utils/test/matchers"
 )
 
@@ -523,7 +526,9 @@ var _ = Describe("Shoot Validation Tests", func() {
 			))
 		})
 
-		It("should forbid updating the seed, if it has been set previously", func() {
+		It("should forbid updating the seed if it has been set previously and the SeedChange feature gate is not enabled", func() {
+			defer test.WithFeatureGate(utilfeature.DefaultFeatureGate, features.SeedChange, false)()
+
 			newShoot := prepareShootForUpdate(shoot)
 			newShoot.Spec.SeedName = pointer.StringPtr("another-seed")
 			shoot.Spec.SeedName = pointer.StringPtr("first-seed")
@@ -536,6 +541,18 @@ var _ = Describe("Shoot Validation Tests", func() {
 					"Field": Equal("spec.seedName"),
 				}))),
 			)
+		})
+
+		It("should allow updating the seed if it has been set previously and the SeedChange feature gate is enabled", func() {
+			defer test.WithFeatureGate(utilfeature.DefaultFeatureGate, features.SeedChange, true)()
+
+			newShoot := prepareShootForUpdate(shoot)
+			newShoot.Spec.SeedName = pointer.StringPtr("another-seed")
+			shoot.Spec.SeedName = pointer.StringPtr("first-seed")
+
+			errorList := ValidateShootUpdate(newShoot, shoot)
+
+			Expect(errorList).To(BeEmpty())
 		})
 
 		It("should forbid passing an extension w/o type information", func() {
@@ -1494,6 +1511,40 @@ var _ = Describe("Shoot Validation Tests", func() {
 			)
 		})
 
+		It("should not allow too high values for max inflight requests fields", func() {
+			shoot.Spec.Kubernetes.KubeAPIServer.Requests = &core.KubeAPIServerRequests{
+				MaxNonMutatingInflight: pointer.Int32Ptr(123123123),
+				MaxMutatingInflight:    pointer.Int32Ptr(412412412),
+			}
+
+			errorList := ValidateShoot(shoot)
+
+			Expect(errorList).To(ConsistOf(PointTo(MatchFields(IgnoreExtras, Fields{
+				"Type":  Equal(field.ErrorTypeInvalid),
+				"Field": Equal("spec.kubernetes.kubeAPIServer.requests.maxNonMutatingInflight"),
+			})), PointTo(MatchFields(IgnoreExtras, Fields{
+				"Type":  Equal(field.ErrorTypeInvalid),
+				"Field": Equal("spec.kubernetes.kubeAPIServer.requests.maxMutatingInflight"),
+			}))))
+		})
+
+		It("should not allow negative values for max inflight requests fields", func() {
+			shoot.Spec.Kubernetes.KubeAPIServer.Requests = &core.KubeAPIServerRequests{
+				MaxNonMutatingInflight: pointer.Int32Ptr(-1),
+				MaxMutatingInflight:    pointer.Int32Ptr(-1),
+			}
+
+			errorList := ValidateShoot(shoot)
+
+			Expect(errorList).To(ConsistOf(PointTo(MatchFields(IgnoreExtras, Fields{
+				"Type":  Equal(field.ErrorTypeInvalid),
+				"Field": Equal("spec.kubernetes.kubeAPIServer.requests.maxNonMutatingInflight"),
+			})), PointTo(MatchFields(IgnoreExtras, Fields{
+				"Type":  Equal(field.ErrorTypeInvalid),
+				"Field": Equal("spec.kubernetes.kubeAPIServer.requests.maxMutatingInflight"),
+			}))))
+		})
+
 		Context("KubeControllerManager validation < 1.12", func() {
 			It("should forbid unsupported HPA configuration", func() {
 				shoot.Spec.Kubernetes.KubeControllerManager.HorizontalPodAutoscalerConfig.SyncPeriod = makeDurationPointer(100 * time.Millisecond)
@@ -1641,7 +1692,8 @@ var _ = Describe("Shoot Validation Tests", func() {
 					PointTo(MatchFields(IgnoreExtras, Fields{
 						"Type":  Equal(field.ErrorTypeInvalid),
 						"Field": Equal("spec.kubernetes.kubeControllerManager.nodeCIDRMaskSize"),
-					}))))
+					})),
+				))
 			})
 
 			It("should succeed when nodeCIDRMaskSize is within boundaries", func() {
@@ -1649,6 +1701,26 @@ var _ = Describe("Shoot Validation Tests", func() {
 
 				errorList := ValidateShoot(shoot)
 				Expect(errorList).To(BeEmpty())
+			})
+
+			It("should prevent setting a negative pod eviction timeout", func() {
+				shoot.Spec.Kubernetes.KubeControllerManager.PodEvictionTimeout = &metav1.Duration{Duration: -1}
+
+				errorList := ValidateShoot(shoot)
+				Expect(errorList).To(ConsistOf(PointTo(MatchFields(IgnoreExtras, Fields{
+					"Type":  Equal(field.ErrorTypeInvalid),
+					"Field": Equal("spec.kubernetes.kubeControllerManager.podEvictionTimeout"),
+				}))))
+			})
+
+			It("should prevent setting the pod eviction timeout to 0", func() {
+				shoot.Spec.Kubernetes.KubeControllerManager.PodEvictionTimeout = &metav1.Duration{}
+
+				errorList := ValidateShoot(shoot)
+				Expect(errorList).To(ConsistOf(PointTo(MatchFields(IgnoreExtras, Fields{
+					"Type":  Equal(field.ErrorTypeInvalid),
+					"Field": Equal("spec.kubernetes.kubeControllerManager.podEvictionTimeout"),
+				}))))
 			})
 		})
 

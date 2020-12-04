@@ -1,5 +1,6 @@
 replicas: 1
 kubernetesVersion: 1.11.2
+priorityClassName: foo
 securePort: 443
 konnectivityTunnel:
   enabled: true
@@ -7,6 +8,7 @@ konnectivityTunnel:
   serverCount: 2
   agentPort: 8132
   adminPort: 8133
+  healthPort: 8134
   agentNamespace: kube-system
 probeCredentials: base64(user:pass)
 shootNetworks:
@@ -62,6 +64,7 @@ images:
   kube-apiserver: image-repository
   vpn-seed: image-repository:image-tag
   konnectivity-server: image-repository:image-tag
+  apiserver-proxy-pod-webhook: image-repository:image-tag
 
 blackboxExporterPort: 9115
 etcdServicePort: 2379
@@ -154,6 +157,8 @@ limitsRequestsGapScaleParams:
 sni:
   enabled: false
   advertiseIP: 1.1.1.1
+  podMutatorEnabled: false
+  # apiserverFQDN: foo.bar.
 
 mountHostCADirectories:
   enabled: false
@@ -166,3 +171,6 @@ mountHostCADirectories:
 #     - apiGroup: apps
 #       resource: deployments
 #       size: 500
+
+#maxNonMutatingRequestsInflight: 400
+#maxMutatingRequestsInflight: 200

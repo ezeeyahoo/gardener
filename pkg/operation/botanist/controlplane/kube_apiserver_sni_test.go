@@ -27,6 +27,7 @@ import (
 	"github.com/golang/mock/gomock"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -63,11 +64,14 @@ var _ = Describe("#KubeAPIServerSNI", func() {
 		)
 
 		defaultDepWaiter = NewKubeAPIServerSNI(&KubeAPIServerSNIValues{
-			Hosts:                 []string{"foo.bar"},
-			ApiserverClusterIP:    "1.1.1.1",
-			IstioIngressNamespace: "istio-foo",
-			Name:                  deployName,
-			NamespaceUID:          types.UID("123456"),
+			Hosts:              []string{"foo.bar"},
+			ApiserverClusterIP: "1.1.1.1",
+			IstioIngressGateway: IstioIngressGateway{
+				Namespace: "istio-foo",
+				Labels:    map[string]string{"foo": "bar"},
+			},
+			Name:         deployName,
+			NamespaceUID: types.UID("123456"),
 		}, deployNS, ca, chartsRoot())
 	})
 
@@ -86,7 +90,6 @@ var _ = Describe("#KubeAPIServerSNI", func() {
 	})
 
 	Context("destroy", func() {
-
 		Context("applier returns an error", func() {
 			var (
 				ctrl *gomock.Controller
@@ -129,6 +132,75 @@ var _ = Describe("#KubeAPIServerSNI", func() {
 			Expect(defaultDepWaiter.Deploy(ctx)).ToNot(HaveOccurred())
 			Expect(defaultDepWaiter.Destroy(ctx)).ToNot(HaveOccurred())
 			Expect(defaultDepWaiter.WaitCleanup(ctx)).ToNot(HaveOccurred())
+		})
+	})
+})
+
+var _ = Describe("#AnyDeployedSNI", func() {
+	var (
+		ctx      context.Context
+		c        client.Client
+		createVS = func(name string, namespace string) *unstructured.Unstructured {
+			return &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": "networking.istio.io/v1beta1",
+					"kind":       "VirtualService",
+					"metadata": map[string]interface{}{
+						"name":      name,
+						"namespace": namespace,
+					},
+				},
+			}
+		}
+	)
+
+	Context("CRD available", func() {
+		BeforeEach(func() {
+			ctx = context.TODO()
+			s := runtime.NewScheme()
+			// TODO(mvladev): can't directly import the istio apis due to dependency issues.
+			s.AddKnownTypeWithName(schema.FromAPIVersionAndKind("networking.istio.io/v1beta1", "VirtualServiceList"), &unstructured.UnstructuredList{})
+			s.AddKnownTypeWithName(schema.FromAPIVersionAndKind("networking.istio.io/v1beta1", "VirtualService"), &unstructured.Unstructured{})
+			c = fake.NewFakeClientWithScheme(s)
+		})
+
+		It("returns true when exists", func() {
+			Expect(c.Create(ctx, createVS("kube-apiserver", "test"))).NotTo(HaveOccurred())
+			any, err := AnyDeployedSNI(ctx, c)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(any).To(BeTrue())
+		})
+
+		It("returns false when does not exists", func() {
+			any, err := AnyDeployedSNI(ctx, c)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(any).To(BeFalse())
+		})
+	})
+
+	Context("CRD not available", func() {
+		var (
+			ctrl   *gomock.Controller
+			client *mockclient.MockClient
+		)
+
+		BeforeEach(func() {
+			ctrl = gomock.NewController(GinkgoT())
+			client = mockclient.NewMockClient(ctrl)
+		})
+
+		AfterEach(func() {
+			ctrl.Finish()
+		})
+
+		It("returns false", func() {
+			client.EXPECT().List(ctx, gomock.AssignableToTypeOf(&unstructured.UnstructuredList{}), gomock.Any()).Return(&meta.NoKindMatchError{})
+			any, err := AnyDeployedSNI(ctx, client)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(any).To(BeFalse())
 		})
 	})
 })

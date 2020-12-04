@@ -47,7 +47,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var _ = Describe("#Infrastructure", func() {
+var _ = Describe("#ExtensionInfrastructure", func() {
 	const (
 		namespace    = "test-namespace"
 		name         = "test-deploy"
@@ -69,7 +69,7 @@ var _ = Describe("#Infrastructure", func() {
 
 		infra        *extensionsv1alpha1.Infrastructure
 		values       *infrastructure.Values
-		deployWaiter shoot.Infrastructure
+		deployWaiter shoot.ExtensionInfrastructure
 		waiter       *retryfake.Ops
 
 		cleanupFunc func()
@@ -154,20 +154,6 @@ var _ = Describe("#Infrastructure", func() {
 			Entry("without provider config", func() {
 				values.ProviderConfig = nil
 				infra.Spec.ProviderConfig = nil
-			}),
-			Entry("creation phase", func() {
-				values.IsInCreationPhase = true
-				infra.Annotations = map[string]string{
-					v1beta1constants.GardenerOperation: v1beta1constants.GardenerOperationReconcile,
-					v1beta1constants.GardenerTimestamp: now.UTC().String(),
-				}
-			}),
-			Entry("wake up phase", func() {
-				values.IsWakingUp = true
-				infra.Annotations = map[string]string{
-					v1beta1constants.GardenerOperation: v1beta1constants.GardenerOperationReconcile,
-					v1beta1constants.GardenerTimestamp: now.UTC().String(),
-				}
 			}),
 			Entry("deployment task", func() {
 				values.DeploymentRequested = true

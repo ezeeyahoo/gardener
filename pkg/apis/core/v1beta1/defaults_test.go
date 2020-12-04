@@ -234,12 +234,13 @@ var _ = Describe("Defaults", func() {
 			Expect(obj.Spec.Settings.VerticalPodAutoscaler.Enabled).To(BeTrue())
 		})
 
-		It("should remove deprecated taints from the seed settings (w/ taints)", func() {
-			obj.Spec.Taints = []SeedTaint{
+		It("should allow taints that were not allowed in version v1.12", func() {
+			taints := []SeedTaint{
 				{Key: "seed.gardener.cloud/disable-capacity-reservation"},
 				{Key: "seed.gardener.cloud/disable-dns"},
 				{Key: "seed.gardener.cloud/invisible"},
 			}
+			obj.Spec.Taints = taints
 
 			SetDefaults_Seed(obj)
 
@@ -247,25 +248,8 @@ var _ = Describe("Defaults", func() {
 			Expect(obj.Spec.Settings.Scheduling.Visible).To(BeTrue())
 			Expect(obj.Spec.Settings.ShootDNS.Enabled).To(BeTrue())
 			Expect(obj.Spec.Settings.VerticalPodAutoscaler.Enabled).To(BeTrue())
-			Expect(obj.Spec.Taints).To(BeEmpty())
-		})
-
-		It("should keep non-deprecated taints from the seed settings (w/ taints)", func() {
-			obj.Spec.Taints = []SeedTaint{
-				{Key: "seed.gardener.cloud/disable-capacity-reservation"},
-				{Key: "seed.gardener.cloud/disable-dns"},
-				{Key: "seed.gardener.cloud/invisible"},
-				{Key: SeedTaintProtected},
-			}
-
-			SetDefaults_Seed(obj)
-
-			Expect(obj.Spec.Settings.ExcessCapacityReservation.Enabled).To(BeTrue())
-			Expect(obj.Spec.Settings.Scheduling.Visible).To(BeTrue())
-			Expect(obj.Spec.Settings.ShootDNS.Enabled).To(BeTrue())
-			Expect(obj.Spec.Settings.VerticalPodAutoscaler.Enabled).To(BeTrue())
-			Expect(obj.Spec.Taints).To(HaveLen(1))
-			Expect(obj.Spec.Taints[0].Key).To(Equal(SeedTaintProtected))
+			Expect(obj.Spec.Taints).To(HaveLen(3))
+			Expect(obj.Spec.Taints).To(Equal(taints))
 		})
 
 		It("should not default the seed settings because they were provided", func() {
@@ -330,11 +314,15 @@ var _ = Describe("Defaults", func() {
 			var (
 				defaultKubeReservedMemory = resource.MustParse("1Gi")
 				defaultKubeReservedCPU    = resource.MustParse("80m")
+				defaultKubeReservedPID    = resource.MustParse("20k")
 				kubeReservedMemory        = resource.MustParse("2Gi")
 				kubeReservedCPU           = resource.MustParse("20m")
+				kubeReservedPID           = resource.MustParse("10k")
 			)
 
-			It("should default all fields", func() {
+			It("should default all fields except PID for k8s < 1.15", func() {
+				obj.Spec.Kubernetes.Version = "1.13.1"
+
 				SetDefaults_Shoot(obj)
 
 				Expect(obj.Spec.Kubernetes.Kubelet.KubeReserved).To(PointTo(Equal(KubeletConfigReserved{
@@ -343,39 +331,24 @@ var _ = Describe("Defaults", func() {
 				})))
 			})
 
-			It("should default memory", func() {
-				obj.Spec.Kubernetes.Kubelet = &KubeletConfig{
-					KubeReserved: &KubeletConfigReserved{
-						CPU: &kubeReservedCPU,
-					},
-				}
-				SetDefaults_Shoot(obj)
+			It("should default all fields for k8s >= 1.15", func() {
+				obj.Spec.Kubernetes.Version = "1.15.1"
 
-				Expect(obj.Spec.Kubernetes.Kubelet.KubeReserved).To(PointTo(Equal(KubeletConfigReserved{
-					CPU:    &kubeReservedCPU,
-					Memory: &defaultKubeReservedMemory,
-				})))
-			})
-
-			It("should default CPU", func() {
-				obj.Spec.Kubernetes.Kubelet = &KubeletConfig{
-					KubeReserved: &KubeletConfigReserved{
-						Memory: &kubeReservedMemory,
-					},
-				}
 				SetDefaults_Shoot(obj)
 
 				Expect(obj.Spec.Kubernetes.Kubelet.KubeReserved).To(PointTo(Equal(KubeletConfigReserved{
 					CPU:    &defaultKubeReservedCPU,
-					Memory: &kubeReservedMemory,
+					Memory: &defaultKubeReservedMemory,
+					PID:    &defaultKubeReservedPID,
 				})))
 			})
 
-			It("should not default kubeReserved", func() {
+			It("should not overwrite manually set kubeReserved", func() {
 				obj.Spec.Kubernetes.Kubelet = &KubeletConfig{
 					KubeReserved: &KubeletConfigReserved{
 						CPU:    &kubeReservedCPU,
 						Memory: &kubeReservedMemory,
+						PID:    &kubeReservedPID,
 					},
 				}
 				SetDefaults_Shoot(obj)
@@ -383,6 +356,7 @@ var _ = Describe("Defaults", func() {
 				Expect(obj.Spec.Kubernetes.Kubelet.KubeReserved).To(PointTo(Equal(KubeletConfigReserved{
 					CPU:    &kubeReservedCPU,
 					Memory: &kubeReservedMemory,
+					PID:    &kubeReservedPID,
 				})))
 			})
 		})
@@ -395,6 +369,23 @@ var _ = Describe("Defaults", func() {
 			SetDefaults_Shoot(obj)
 
 			Expect(obj.Spec.Kubernetes.Kubelet.FailSwapOn).To(PointTo(BeFalse()))
+		})
+
+		It("should not default the kube-controller-manager's pod eviction timeout field", func() {
+			podEvictionTimeout := &metav1.Duration{Duration: time.Minute}
+			obj.Spec.Kubernetes.KubeControllerManager = &KubeControllerManagerConfig{PodEvictionTimeout: podEvictionTimeout}
+
+			SetDefaults_Shoot(obj)
+
+			Expect(obj.Spec.Kubernetes.KubeControllerManager.PodEvictionTimeout).To(Equal(podEvictionTimeout))
+		})
+
+		It("should default the kube-controller-manager's pod eviction timeout field", func() {
+			obj.Spec.Kubernetes.KubeControllerManager = &KubeControllerManagerConfig{}
+
+			SetDefaults_Shoot(obj)
+
+			Expect(obj.Spec.Kubernetes.KubeControllerManager.PodEvictionTimeout).To(Equal(&metav1.Duration{Duration: 2 * time.Minute}))
 		})
 
 		It("should set the maintenance field", func() {
@@ -415,6 +406,27 @@ var _ = Describe("Defaults", func() {
 			obj.Spec.Kubernetes.Version = "1.16.1"
 			SetDefaults_Shoot(obj)
 			Expect(obj.Spec.Kubernetes.KubeAPIServer.EnableBasicAuthentication).To(PointTo(BeFalse()))
+		})
+
+		It("should default the max inflight requests fields", func() {
+			SetDefaults_Shoot(obj)
+			Expect(obj.Spec.Kubernetes.KubeAPIServer.Requests.MaxNonMutatingInflight).To(Equal(pointer.Int32Ptr(400)))
+			Expect(obj.Spec.Kubernetes.KubeAPIServer.Requests.MaxMutatingInflight).To(Equal(pointer.Int32Ptr(200)))
+		})
+
+		It("should not default the max inflight requests fields", func() {
+			var (
+				maxNonMutatingRequestsInflight int32 = 123
+				maxMutatingRequestsInflight    int32 = 456
+			)
+
+			obj.Spec.Kubernetes.KubeAPIServer = &KubeAPIServerConfig{Requests: &KubeAPIServerRequests{}}
+			obj.Spec.Kubernetes.KubeAPIServer.Requests.MaxNonMutatingInflight = &maxNonMutatingRequestsInflight
+			obj.Spec.Kubernetes.KubeAPIServer.Requests.MaxMutatingInflight = &maxMutatingRequestsInflight
+
+			SetDefaults_Shoot(obj)
+			Expect(obj.Spec.Kubernetes.KubeAPIServer.Requests.MaxNonMutatingInflight).To(Equal(&maxNonMutatingRequestsInflight))
+			Expect(obj.Spec.Kubernetes.KubeAPIServer.Requests.MaxMutatingInflight).To(Equal(&maxMutatingRequestsInflight))
 		})
 	})
 

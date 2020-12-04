@@ -107,6 +107,17 @@ var _ = Describe("ClusterAutoscaler", func() {
 				UpdatePolicy: &autoscalingv1beta2.PodUpdatePolicy{
 					UpdateMode: &vpaUpdateMode,
 				},
+				ResourcePolicy: &autoscalingv1beta2.PodResourcePolicy{
+					ContainerPolicies: []autoscalingv1beta2.ContainerResourcePolicy{
+						{
+							ContainerName: autoscalingv1beta2.DefaultContainerResourcePolicy,
+							MinAllowed: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("20m"),
+								corev1.ResourceMemory: resource.MustParse("50Mi"),
+							},
+						},
+					},
+				},
 			},
 		}
 		clusterRoleBinding = &rbacv1.ClusterRoleBinding{
@@ -206,6 +217,7 @@ var _ = Describe("ClusterAutoscaler", func() {
 					Labels: map[string]string{
 						"app":                     "kubernetes",
 						"role":                    "cluster-autoscaler",
+						"gardener.cloud/role":     "controlplane",
 						"garden.sapcloud.io/role": "controlplane",
 					},
 				},
@@ -443,8 +455,8 @@ subjects:
 			},
 			Type: corev1.SecretTypeOpaque,
 			Data: map[string][]byte{
-				"clusterrole.yaml":        []byte(clusterRoleYAML),
-				"clusterrolebinding.yaml": []byte(clusterRoleBindingYAML),
+				"clusterrole____system_cluster-autoscaler-shoot.yaml":        []byte(clusterRoleYAML),
+				"clusterrolebinding____system_cluster-autoscaler-shoot.yaml": []byte(clusterRoleBindingYAML),
 			},
 		}
 		managedResource = &resourcesv1alpha1.ManagedResource{

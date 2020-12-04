@@ -8,7 +8,11 @@ apiserver-proxy:
     apiserver-proxy: image-repository
     apiserver-proxy-sidecar: image-repository
   advertiseIPAddress: 1.1.1.1
-  proxySeedServer: dummy.127.0.0.1.nip.io
+  # webhook:
+    # caBundle: LS0tLS1C
+  proxySeedServer:
+    host: dummy.127.0.0.1.nip.io
+    port: 8443
 coredns:
   enabled: true
 konnectivity-agent:
@@ -18,8 +22,6 @@ konnectivity-agent:
     konnectivity-agent: image-repository:image-tag
 kube-apiserver-kubelet:
   enabled: true
-kube-controller-manager:
-  enabled: true
 kube-proxy:
   enabled: true
   kubeconfig: dummy-add-the-data-of-a-kubernetes-secret
@@ -27,10 +29,6 @@ kube-proxy:
   podAnnotations: {}
   images:
     kube-proxy: image-repository
-metrics-server:
-  enabled: true
-  images:
-    metrics-server: image-repository:image-tag
 monitoring:
   enabled: true
   node-exporter:

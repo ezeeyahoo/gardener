@@ -16,6 +16,7 @@ package webhooks
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -23,10 +24,18 @@ import (
 
 	"github.com/gardener/gardener/pkg/logger"
 
+	"github.com/sirupsen/logrus"
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+)
+
+const (
+	// maxRequestBody is the maximum size of the `AdmissionReview` body.
+	// Same, fixed value from API server for general safety to reduce the odds of OOM issues while reading the body.
+	// https://github.com/kubernetes/kubernetes/blob/d8eac8df28e6b50cd0f5380e23fc57daaf92972e/staging/src/k8s.io/apiserver/pkg/server/config.go#L322
+	maxRequestBody = 3 * 1024 * 1024
 )
 
 func admissionResponse(allowed bool, msg string) *admissionv1beta1.AdmissionResponse {
@@ -64,7 +73,7 @@ func respond(w http.ResponseWriter, response *admissionv1beta1.AdmissionResponse
 
 // DecodeAdmissionRequest decodes the given http request into an admission request.
 // An error is returned if the request exceeds the given limit.
-func DecodeAdmissionRequest(r *http.Request, decoder runtime.Decoder, into *admissionv1beta1.AdmissionReview, limit int64) error {
+func DecodeAdmissionRequest(r *http.Request, decoder runtime.Decoder, into *admissionv1beta1.AdmissionReview, limit int64, logger logrus.FieldLogger) error {
 	// Read HTTP request body into variable.
 	var (
 		body              []byte
@@ -76,7 +85,9 @@ func DecodeAdmissionRequest(r *http.Request, decoder runtime.Decoder, into *admi
 	if r.Body != nil {
 		data, err := ioutil.ReadAll(lr)
 		if err != nil {
-			return err
+			logger.Error(err)
+			// Don't return actual error here since it might be part of a user response.
+			return errors.New("an unexpected error occurred when reading the request body")
 		}
 		if lr.N <= 0 {
 			return apierrors.NewRequestEntityTooLargeError(fmt.Sprintf("limit is %d", limit))
@@ -86,7 +97,7 @@ func DecodeAdmissionRequest(r *http.Request, decoder runtime.Decoder, into *admi
 
 	// Verify that the correct content-type header has been sent.
 	if contentType := r.Header.Get("Content-Type"); contentType != wantedContentType {
-		return fmt.Errorf("contentType=%s, expect %s", contentType, wantedContentType)
+		return fmt.Errorf("contentType not supported, expect %s", wantedContentType)
 	}
 
 	// Deserialize HTTP request body into admissionv1beta1.AdmissionReview object.

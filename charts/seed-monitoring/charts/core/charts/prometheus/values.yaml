@@ -53,8 +53,7 @@ allowedMetrics:
   - container_network_receive_bytes_total
   - container_network_transmit_bytes_total
   coredns:
-  - process_max_fds
-  - process_open_fds
+  - coredns_build_info
   - coredns_cache_entries
   - coredns_cache_hits_total
   - coredns_cache_misses_total
@@ -62,6 +61,8 @@ allowedMetrics:
   - coredns_dns_responses_total
   - coredns_forward_requests_total
   - coredns_forward_responses_total
+  - process_max_fds
+  - process_open_fds
   cloudControllerManager:
   - rest_client_requests_total
   - process_max_fds
@@ -76,50 +77,6 @@ allowedMetrics:
   - process_open_fds
   - apiserver_audit_event_total
   - apiserver_audit_error_total
-  kubeControllerManager:
-  - rest_client_requests_total
-  - process_max_fds
-  - process_open_fds
-  kubeETCD3:
-  - etcd_disk_backend_commit_duration_seconds_bucket
-  - etcd_disk_wal_fsync_duration_seconds_bucket
-  - etcd_mvcc_db_total_size_in_bytes
-  - etcd_network_client_grpc_received_bytes_total
-  - etcd_network_client_grpc_sent_bytes_total
-  - etcd_network_peer_received_bytes_total
-  - etcd_network_peer_sent_bytes_total
-  - etcd_server_has_leader
-  - etcd_server_leader_changes_seen_total
-  - etcd_server_proposals_applied_total
-  - etcd_server_proposals_committed_total
-  - etcd_server_proposals_failed_total
-  - etcd_server_proposals_pending
-  - grpc_server_handled_total
-  - grpc_server_started_total
-  - process_max_fds
-  - process_open_fds
-  - process_resident_memory_bytes
-  kubeETCD3BR:
-  - etcdbr_defragmentation_duration_seconds_bucket
-  - etcdbr_defragmentation_duration_seconds_count
-  - etcdbr_defragmentation_duration_seconds_sum
-  - etcdbr_network_received_bytes
-  - etcdbr_network_transmitted_bytes
-  - etcdbr_restoration_duration_seconds_bucket
-  - etcdbr_restoration_duration_seconds_count
-  - etcdbr_restoration_duration_seconds_sum
-  - etcdbr_snapshot_duration_seconds_bucket
-  - etcdbr_snapshot_duration_seconds_count
-  - etcdbr_snapshot_duration_seconds_sum
-  - etcdbr_snapshot_gc_total
-  - etcdbr_snapshot_latest_revision
-  - etcdbr_snapshot_latest_timestamp
-  - etcdbr_snapshot_required
-  - etcdbr_validation_duration_seconds_bucket
-  - etcdbr_validation_duration_seconds_count
-  - etcdbr_validation_duration_seconds_sum
-  - process_resident_memory_bytes
-  - process_cpu_seconds_total
   kubeProxy:
   - kubeproxy_network_programming_duration_seconds_bucket
   - kubeproxy_network_programming_duration_seconds_count
@@ -282,7 +239,24 @@ allowedMetrics:
   - loki_panic_total
   - loki_logql_querystats_duplicates_total
   - loki_logql_querystats_ingester_sent_lines_total
-
+  apiserverProxy:
+  - envoy_cluster_bind_errors
+  - envoy_cluster_lb_healthy_panic
+  - envoy_cluster_update_attempt
+  - envoy_cluster_update_failure
+  - envoy_cluster_upstream_cx_connect_ms_bucket
+  - envoy_cluster_upstream_cx_length_ms_bucket
+  - envoy_cluster_upstream_cx_none_healthy
+  - envoy_cluster_upstream_cx_rx_bytes_total
+  - envoy_cluster_upstream_cx_tx_bytes_total
+  - envoy_listener_downstream_cx_destroy
+  - envoy_listener_downstream_cx_length_ms_bucket
+  - envoy_listener_downstream_cx_overflow
+  - envoy_listener_downstream_cx_total
+  - envoy_tcp_downstream_cx_no_route
+  - envoy_tcp_downstream_cx_rx_bytes_total
+  - envoy_tcp_downstream_cx_total
+  - envoy_tcp_downstream_cx_tx_bytes_total
 seed:
   apiserver: https://api.foo.bar
   region: antarctica-1

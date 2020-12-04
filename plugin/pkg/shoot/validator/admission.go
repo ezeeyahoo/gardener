@@ -25,7 +25,7 @@ import (
 
 	"github.com/gardener/gardener/pkg/apis/core"
 	"github.com/gardener/gardener/pkg/apis/core/helper"
-	"github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
+	v1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
 	admissioninitializer "github.com/gardener/gardener/pkg/apiserver/admission/initializer"
 	coreinformers "github.com/gardener/gardener/pkg/client/core/informers/internalversion"
 	corelisters "github.com/gardener/gardener/pkg/client/core/listers/core/internalversion"
@@ -64,7 +64,6 @@ type ValidateShoot struct {
 	seedLister         corelisters.SeedLister
 	shootLister        corelisters.ShootLister
 	projectLister      corelisters.ProjectLister
-	backupBucketLister corelisters.BackupBucketLister
 	readyFunc          admission.ReadyFunc
 }
 
@@ -101,16 +100,12 @@ func (v *ValidateShoot) SetInternalCoreInformerFactory(f coreinformers.SharedInf
 	projectInformer := f.Core().InternalVersion().Projects()
 	v.projectLister = projectInformer.Lister()
 
-	backupBucketInformer := f.Core().InternalVersion().BackupBuckets()
-	v.backupBucketLister = backupBucketInformer.Lister()
-
 	readyFuncs = append(
 		readyFuncs,
 		seedInformer.Informer().HasSynced,
 		shootInformer.Informer().HasSynced,
 		cloudProfileInformer.Informer().HasSynced,
 		projectInformer.Informer().HasSynced,
-		backupBucketInformer.Informer().HasSynced,
 	)
 }
 
@@ -127,9 +122,6 @@ func (v *ValidateShoot) ValidateInitialization() error {
 	}
 	if v.projectLister == nil {
 		return errors.New("missing project lister")
-	}
-	if v.backupBucketLister == nil {
-		return errors.New("missing backupbucket lister")
 	}
 	return nil
 }
@@ -232,6 +224,7 @@ func (v *ValidateShoot) Admit(ctx context.Context, a admission.Attributes, o adm
 		if project.DeletionTimestamp != nil {
 			return admission.NewForbidden(a, fmt.Errorf("cannot create shoot '%s' in project '%s' already marked for deletion", shoot.Name, project.Name))
 		}
+		addInfrastructureDeploymentTask(shoot)
 	}
 
 	mustCheckIfTaintsTolerated := a.GetOperation() == admission.Create || (a.GetOperation() == admission.Update && !apiequality.Semantic.DeepEqual(shoot.Spec.SeedName, oldShoot.Spec.SeedName))
@@ -245,8 +238,18 @@ func (v *ValidateShoot) Admit(ctx context.Context, a admission.Attributes, o adm
 	}
 
 	if oldShoot.Spec.SeedName != nil && !apiequality.Semantic.DeepEqual(shoot.Spec.SeedName, oldShoot.Spec.SeedName) &&
-		seed != nil && seed.Spec.Backup == nil {
-		return admission.NewForbidden(a, fmt.Errorf("cannot change seed name, because seed backup is not configured, for shoot %q", shoot.Name))
+		seed != nil {
+		if seed.Spec.Backup == nil {
+			return admission.NewForbidden(a, fmt.Errorf("cannot change seed name, because seed backup is not configured, for shoot %q", shoot.Name))
+		}
+
+		oldSeed, err := v.seedLister.Get(*oldShoot.Spec.SeedName)
+		if err != nil {
+			return apierrors.NewBadRequest(fmt.Sprintf("could not find referenced seed: %+v", err.Error()))
+		}
+		if oldSeed.Spec.Provider.Type != seed.Spec.Provider.Type {
+			return admission.NewForbidden(a, fmt.Errorf("cannot change seed name, because cloud provider for new seed (%s) is not equal to cloud provider for old seed (%s)", seed.Spec.Provider.Type, oldSeed.Spec.Provider.Type))
+		}
 	}
 
 	if shoot.Spec.Provider.Type != cloudProfile.Spec.Type {
@@ -326,6 +329,10 @@ func (v *ValidateShoot) Admit(ctx context.Context, a admission.Attributes, o adm
 		}
 	}
 
+	if !newIsHibernated && oldIsHibernated {
+		addInfrastructureDeploymentTask(shoot)
+	}
+
 	if seed != nil {
 		if shoot.Spec.Networking.Pods == nil && seed.Spec.Networks.ShootDefaults != nil {
 			shoot.Spec.Networking.Pods = seed.Spec.Networks.ShootDefaults.Pods
@@ -336,10 +343,7 @@ func (v *ValidateShoot) Admit(ctx context.Context, a admission.Attributes, o adm
 	}
 
 	if !reflect.DeepEqual(oldShoot.Spec.Provider.InfrastructureConfig, shoot.Spec.Provider.InfrastructureConfig) {
-		if shoot.ObjectMeta.Annotations == nil {
-			shoot.ObjectMeta.Annotations = make(map[string]string)
-		}
-		controllerutils.AddTasks(shoot.ObjectMeta.Annotations, common.ShootTaskDeployInfrastructure)
+		addInfrastructureDeploymentTask(shoot)
 	}
 
 	if shoot.Spec.Maintenance != nil && utils.IsTrue(shoot.Spec.Maintenance.ConfineSpecUpdateRollout) &&
@@ -906,16 +910,16 @@ func ensureMachineImage(oldWorkers []core.Worker, worker core.Worker, images []c
 }
 
 func (v ValidateShoot) validateShootedSeed(a admission.Attributes, shoot, oldShoot *core.Shoot) error {
-	if shoot.Namespace != constants.GardenNamespace {
+	if shoot.Namespace != v1beta1constants.GardenNamespace {
 		return nil
 	}
 
-	oldVal, oldOk := constants.GetShootUseAsSeedAnnotation(oldShoot.Annotations)
+	oldVal, oldOk := oldShoot.Annotations[v1beta1constants.AnnotationShootUseAsSeed]
 	if !oldOk || len(oldVal) == 0 {
 		return nil
 	}
 
-	val, ok := constants.GetShootUseAsSeedAnnotation(shoot.Annotations)
+	val, ok := shoot.Annotations[v1beta1constants.AnnotationShootUseAsSeed]
 	if ok && len(val) != 0 {
 		return nil
 	}
@@ -924,26 +928,24 @@ func (v ValidateShoot) validateShootedSeed(a admission.Attributes, shoot, oldSho
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
-		return apierrors.NewInternalError(fmt.Errorf("could not get seed '%s' to verify that annotation '%s' can be removed: %v", shoot.Name, constants.AnnotationShootUseAsSeed, err))
+		return apierrors.NewInternalError(fmt.Errorf("could not get seed '%s' to verify that annotation '%s' can be removed: %v", shoot.Name, v1beta1constants.AnnotationShootUseAsSeed, err))
 	}
 
 	shoots, err := v.shootLister.List(labels.Everything())
 	if err != nil {
-		return apierrors.NewInternalError(fmt.Errorf("could not list shoots to verify that annotation '%s' can be removed: %v", constants.AnnotationShootUseAsSeed, err))
-	}
-
-	backupbuckets, err := v.backupBucketLister.List(labels.Everything())
-	if err != nil {
-		return apierrors.NewInternalError(fmt.Errorf("could not list backupbuckets to verify that annotation '%s' can be removed: %v", constants.AnnotationShootUseAsSeed, err))
+		return apierrors.NewInternalError(fmt.Errorf("could not list shoots to verify that annotation '%s' can be removed: %v", v1beta1constants.AnnotationShootUseAsSeed, err))
 	}
 
 	if admissionutils.IsSeedUsedByShoot(shoot.Name, shoots) {
 		return admission.NewForbidden(a, fmt.Errorf("cannot delete seed '%s' which is still used by shoot(s)", shoot.Name))
 	}
 
-	if admissionutils.IsSeedUsedByBackupBucket(shoot.Name, backupbuckets) {
-		return admission.NewForbidden(a, fmt.Errorf("cannot delete seed '%s' which is still used by backupbucket(s)", shoot.Name))
-	}
-
 	return nil
+}
+
+func addInfrastructureDeploymentTask(shoot *core.Shoot) {
+	if shoot.ObjectMeta.Annotations == nil {
+		shoot.ObjectMeta.Annotations = make(map[string]string)
+	}
+	controllerutils.AddTasks(shoot.ObjectMeta.Annotations, common.ShootTaskDeployInfrastructure)
 }

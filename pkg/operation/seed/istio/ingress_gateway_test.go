@@ -27,7 +27,10 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -53,6 +56,7 @@ var _ = Describe("ingress", func() {
 		s := runtime.NewScheme()
 		Expect(corev1.AddToScheme(s)).ToNot(HaveOccurred())
 		Expect(appsv1.AddToScheme(s)).ToNot(HaveOccurred())
+		Expect(policyv1beta1.AddToScheme(s)).ToNot(HaveOccurred())
 
 		c = fake.NewFakeClientWithScheme(s)
 		renderer := cr.NewWithServerVersion(&version.Info{})
@@ -94,10 +98,7 @@ var _ = Describe("ingress", func() {
 			actualDeploy := &appsv1.Deployment{}
 
 			Expect(c.Get(ctx, client.ObjectKey{Name: "istio-ingressgateway", Namespace: deployNS}, actualDeploy)).ToNot(HaveOccurred())
-			envs := actualDeploy.Spec.Template.Spec.Containers[0].Env
-
-			Expect(envs).To(HaveLen(19))
-			Expect(envs).To(ContainElement(env))
+			Expect(actualDeploy.Spec.Template.Spec.Containers[0].Env).To(ContainElement(env))
 		},
 		Entry("NODE_NAME is projected", fieldEnv("NODE_NAME", "spec.nodeName")),
 		Entry("POD_NAME is projected", fieldEnv("POD_NAME", "metadata.name")),
@@ -114,18 +115,57 @@ var _ = Describe("ingress", func() {
 		Entry("workload name is set", simplEnv("ISTIO_META_WORKLOAD_NAME", "istio-ingressgateway")),
 		Entry("meta owner is igw",
 			simplEnv("ISTIO_META_OWNER", "kubernetes://apis/apps/v1/namespaces/test-ingress/deployments/istio-ingressgateway")),
-		Entry("mesh id is the trust domain", simplEnv("ISTIO_META_MESH_ID", "foo.bar")),
 		Entry("auto mTLS is enabled", simplEnv("ISTIO_AUTO_MTLS_ENABLED", "true")),
-		Entry("router mode is sni-dnat", simplEnv("ISTIO_META_ROUTER_MODE", "sni-dnat")),
+		Entry("router mode is standard", simplEnv("ISTIO_META_ROUTER_MODE", "standard")),
 		Entry("ISTIO_META_CLUSTER_ID is Kubernetes", simplEnv("ISTIO_META_CLUSTER_ID", "Kubernetes")),
 		Entry("ISTIO_BOOTSTRAP_OVERRIDE is set to override",
 			simplEnv("ISTIO_BOOTSTRAP_OVERRIDE", "/etc/istio/custom-bootstrap/custom_bootstrap.yaml")),
 	)
+
+	It("ingress gateway deployment has correct amount of environment variables", func() {
+		actualDeploy := &appsv1.Deployment{}
+
+		Expect(c.Get(ctx, client.ObjectKey{Name: "istio-ingressgateway", Namespace: deployNS}, actualDeploy)).ToNot(HaveOccurred())
+		Expect(actualDeploy.Spec.Template.Spec.Containers[0].Env).To(HaveLen(18))
+	})
 
 	It("ingress gateway service has load balancer annotations", func() {
 		svc := &corev1.Service{}
 
 		Expect(c.Get(ctx, client.ObjectKey{Name: "istio-ingressgateway", Namespace: deployNS}, svc)).To(Succeed())
 		Expect(svc.Annotations).To(HaveKeyWithValue("foo", "bar"))
+	})
+
+	Describe("poddisruption budget", func() {
+		var pdb *policyv1beta1.PodDisruptionBudget
+
+		JustBeforeEach(func() {
+			pdb = &policyv1beta1.PodDisruptionBudget{}
+
+			Expect(c.Get(
+				ctx,
+				client.ObjectKey{Name: "istio-ingressgateway", Namespace: deployNS},
+				pdb),
+			).ToNot(HaveOccurred(), "pdp get succeeds")
+		})
+
+		It("matches deployment labels", func() {
+			actualDeploy := &appsv1.Deployment{}
+
+			Expect(c.Get(
+				ctx,
+				client.ObjectKey{Name: "istio-ingressgateway", Namespace: deployNS},
+				actualDeploy),
+			).ToNot(HaveOccurred(), "igw deployment get succeeds")
+
+			s, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
+			Expect(err).ToNot(HaveOccurred(), "selector can be parsed")
+
+			Expect(s.Matches(labels.Set(actualDeploy.Labels))).To(BeTrue())
+		})
+
+		It("requires minimum one replica", func() {
+			Expect(pdb.Spec.MinAvailable.IntValue()).To(Equal(1))
+		})
 	})
 })

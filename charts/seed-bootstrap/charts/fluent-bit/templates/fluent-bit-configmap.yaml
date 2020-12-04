@@ -15,6 +15,12 @@ data:
 {{- include "input.conf" . }}
 
   filter-kubernetes.conf: |-
+    [FILTER]
+        Name                lua
+        Match               kubernetes.*
+        script              add_tag_to_record.lua
+        call                add_tag_to_record
+
     # Systemd Filters
     [FILTER]
         Name record_modifier
@@ -75,27 +81,6 @@ data:
 
     [FILTER]
         Name                parser
-        Match               kubernetes.*kube-controller-manager*kube-controller-manager*
-        Key_Name            log
-        Parser              kubeapiserverParser
-        Reserve_Data        True
-
-    [FILTER]
-        Name                parser
-        Match               kubernetes.*etcd*etcd*
-        Key_Name            log
-        Parser              etcdeventsParser
-        Reserve_Data        True
-
-    [FILTER]
-        Name                parser
-        Match               kubernetes.*etcd*backup-restore*
-        Key_Name            log
-        Parser              gsacParser
-        Reserve_Data        True
-
-    [FILTER]
-        Name                parser
         Match               kubernetes.*kube-state-metrics*kube-state-metrics*
         Key_Name            log
         Parser              kubeapiserverParser
@@ -119,13 +104,6 @@ data:
     [FILTER]
         Name                parser
         Match               kubernetes.*addons-nginx-ingress-controller*nginx-ingress-controller*
-        Key_Name            log
-        Parser              kubeapiserverParser
-        Reserve_Data        True
-
-    [FILTER]
-        Name                parser
-        Match               kubernetes.*metrics-server*metrics-server*
         Key_Name            log
         Parser              kubeapiserverParser
         Reserve_Data        True
@@ -165,13 +143,6 @@ data:
         Match               kubernetes.*alertmanager*alertmanager*
         Key_Name            log
         Parser              alertmanagerParser
-        Reserve_Data        True
-
-    [FILTER]
-        Name                parser
-        Match               kubernetes.*gardener-seed-admission-controller*gardener-seed-admission-controller*
-        Key_Name            log
-        Parser              gsacParser
         Reserve_Data        True
 
     [FILTER]
@@ -238,18 +209,6 @@ data:
         Rename              msg    log
         Rename              logger source
 
-    # Kubernetes filter
-    [FILTER]
-        Name                kubernetes
-        Match               kubernetes.*
-        Kube_Tag_Prefix     kubernetes.var.log.containers.
-        Kube_URL            https://kubernetes.default.svc.cluster.local:443
-        Buffer_Size         1M
-        Labels              On
-        Annotations         On
-        tls.verify          Off
-        K8S-Logging.Exclude Off
-
     # Extensions
 {{ if .Values.additionalFilters }}
 {{- toString .Values.additionalFilters | indent 4 }}
@@ -261,13 +220,6 @@ data:
         script              modify_severity.lua
         call                cb_modify
 
-    [FILTER]
-        Name                lua
-        Match               kubernetes.*
-        script              add_tag_to_record.lua
-        call                add_tag_to_record
-
-
   output.conf: |-
     # Output section
 {{- include "output.conf" . }}
@@ -278,7 +230,7 @@ data:
         Name        docker
         Format      json
         Time_Key    time
-        Time_Format %Y-%m-%dT%H:%M:%S.%L
+        Time_Format %Y-%m-%dT%H:%M:%S.%L%z
         Time_Keep   On
         # Command      |  Decoder | Field | Optional Action
         # =============|==================|=================
@@ -290,13 +242,6 @@ data:
         Regex       ^(?<severity>\w)(?<time>\d{4} [^\s]*)\s+(?<pid>\d+)\s+(?<source>[^ \]]+)\] (?<log>.*)$
         Time_Key    time
         Time_Format %m%d %H:%M:%S.%L
-
-    [PARSER]
-        Name        etcdeventsParser
-        Format      regex
-        Regex       ^(?<time>\d{4}-\d{2}-\d{2}\s+[^ ]*)\s+(?<severity>\w+)\s+\|\s+(?<source>[^ :]*):\s+(?<log>.*)
-        Time_Key    time
-        Time_Format %Y-%m-%d %H:%M:%S.%L
 
     [PARSER]
         Name        alertmanagerParser
@@ -334,13 +279,6 @@ data:
         Time_Format %Y-%m-%dT%H:%M:%S.%L
 
     [PARSER]
-        Name        gsacParser
-        Format      regex
-        Regex       ^time="(?<time>\d{4}-\d{2}-\d{2}T[^"]*)"\s+level=(?<severity>\w+)\smsg="(?<log>.*)"
-        Time_Key    time
-        Time_Format %Y-%m-%dT%H:%M:%S.%L
-
-    [PARSER]
         Name        grafanaParser
         Format      regex
         Regex       ^t=(?<time>\d{4}-\d{2}-\d{2}T[^ ]*)\s+lvl=(?<severity>\w+)\smsg="(?<log>.*)"\s+logger=(?<source>.*)
@@ -366,6 +304,7 @@ data:
   plugin.conf: |-
     [PLUGINS]
         Path /fluent-bit/plugins/out_loki.so
+
   modify_severity.lua: |-
     function cb_modify(tag, timestamp, record)
       local unified_severity = cb_modify_unify_severity(record)
@@ -421,16 +360,10 @@ data:
 
   kubernetes_label_map.json: |-
     {
-      "kubernetes": {
-        "container_name": "container_name",
-        "pod_name": "pod_name"
-      },
-      "type": "user",
+      "kubernetes": {{ toJson .Values.lokiLabels.kubernetesLabels }} ,
       "severity": "severity"
     }
 
   systemd_label_map.json: |-
-    {
-      "hostname": "hostname",
-      "unit": "unit"
-    }
+{{ toJson .Values.lokiLabels.systemdLabels | indent 4}}
+

@@ -28,13 +28,10 @@ import (
 	admissioninitializer "github.com/gardener/gardener/pkg/apiserver/admission/initializer"
 	coreinformers "github.com/gardener/gardener/pkg/client/core/informers/internalversion"
 	corelisters "github.com/gardener/gardener/pkg/client/core/listers/core/internalversion"
-	"github.com/gardener/gardener/pkg/logger"
 	"github.com/gardener/gardener/pkg/operation/common"
-	"github.com/gardener/gardener/pkg/utils"
 	gardenerutils "github.com/gardener/gardener/pkg/utils"
 	admissionutils "github.com/gardener/gardener/plugin/pkg/utils"
 
-	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apiserver/pkg/admission"
@@ -47,13 +44,6 @@ const (
 	// PluginName is the name of this admission plugin.
 	PluginName = "ShootDNS"
 )
-
-var log = logger.NewLogger("").WithField("admission", PluginName)
-
-// SetLogger sets the logger for this admission plugin.
-func SetLogger(logger *logrus.Entry) {
-	log = logger
-}
 
 // Register registers a plugin.
 func Register(plugins *admission.Plugins) {
@@ -196,9 +186,20 @@ func (d *DNS) Admit(ctx context.Context, a admission.Attributes, o admission.Obj
 		if shoot.Spec.SeedName == nil {
 			return nil
 		}
+
 		if oldShoot.Spec.SeedName != nil {
-			removeFunctionlessDNSProviders(shoot.Name, shoot.Namespace, shoot.Spec.DNS)
-			return nil
+			if *oldShoot.Spec.SeedName != *shoot.Spec.SeedName {
+				if err := checkIfShootMigrationIsPossible(d.seedLister, oldShoot, shoot); err != nil {
+					return err
+				}
+				if shoot.Spec.DNS != nil {
+					return checkFunctionlessDNSProviders(shoot.Spec.DNS)
+				}
+				return nil
+			}
+			if shoot.Spec.DNS != nil {
+				return checkFunctionlessDNSProviders(shoot.Spec.DNS)
+			}
 		}
 	}
 
@@ -225,35 +226,42 @@ func (d *DNS) Admit(ctx context.Context, a admission.Attributes, o admission.Obj
 		}
 	}
 
-	if err := managePrimaryDNSProvider(shoot.Spec.DNS, defaultDomains); err != nil {
-		return err
+	if shoot.Spec.DNS != nil {
+		if err := setPrimaryDNSProvider(shoot.Spec.DNS, defaultDomains); err != nil {
+			return err
+		}
+		if err := checkFunctionlessDNSProviders(shoot.Spec.DNS); err != nil {
+			return err
+		}
 	}
-
-	removeFunctionlessDNSProviders(shoot.Name, shoot.Namespace, shoot.Spec.DNS)
-
 	return nil
 }
 
-func removeFunctionlessDNSProviders(shootName, namespace string, dns *core.DNS) {
-	if dns == nil {
-		return
-	}
-
-	// TODO: timuthy - Deny shoots with functionless DNS providers in the future instead of removing them here.
-	var providers []core.DNSProvider
+// checkFunctionlessDNSProviders returns an error if a non-primary provider isn't configured correctly.
+func checkFunctionlessDNSProviders(dns *core.DNS) error {
 	for _, provider := range dns.Providers {
-		if !utils.IsTrue(provider.Primary) && (provider.Type == nil || provider.SecretName == nil) {
-			log.Warnf("Detected functionless DNS provider for shoot %s/%s. This will be forbidden in a future version of Gardener.", namespace, shootName)
-			continue
+		if !gardenerutils.IsTrue(provider.Primary) && (provider.Type == nil || provider.SecretName == nil) {
+			return apierrors.NewBadRequest("non-primary DNS providers in .spec.dns.providers must specify a `type` and `secretName`")
 		}
-
-		providers = append(providers, provider)
-		continue
 	}
-
-	dns.Providers = providers
+	return nil
 }
 
+func checkIfShootMigrationIsPossible(seedLister corelisters.SeedLister, oldShoot, newShoot *core.Shoot) error {
+	for _, seedName := range []string{*oldShoot.Spec.SeedName, *newShoot.Spec.SeedName} {
+		seedDNSDisabled, err := seedDisablesDNS(seedLister, seedName)
+		if err != nil {
+			return apierrors.NewBadRequest(fmt.Sprintf("could not get referenced seed: %+v", err.Error()))
+		}
+		if seedDNSDisabled {
+			return apierrors.NewBadRequest("source and destination seeds must enable DNS so that the shoot can be migrated")
+		}
+	}
+	return nil
+}
+
+// checkPrimaryDNSProvider checks if the shoot uses a default domain and returns an error
+// if a primary provider is used at the same time.
 func checkPrimaryDNSProvider(dns *core.DNS, defaultDomains []string) error {
 	if dns == nil || dns.Domain == nil || len(dns.Providers) == 0 {
 		return nil
@@ -278,7 +286,7 @@ func isDefaultDomain(domain string, defaultDomains []string) bool {
 	return false
 }
 
-func managePrimaryDNSProvider(dns *core.DNS, defaultDomains []string) error {
+func setPrimaryDNSProvider(dns *core.DNS, defaultDomains []string) error {
 	if dns == nil {
 		return nil
 	}

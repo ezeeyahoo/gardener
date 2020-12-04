@@ -19,6 +19,18 @@ spec:
         networking.gardener.cloud/to-dns: allowed
         networking.gardener.cloud/to-seed-apiserver: allowed
     spec:
+      initContainers:
+      - name: install-plugin
+        image: {{ index .Values.global.images "fluent-bit-plugin-installer" }}
+        command:
+        - cp
+        - /source/plugins/.
+        - /plugins
+        - -fr
+        volumeMounts:
+        - name: plugins
+          mountPath: "/plugins"
+      priorityClassName: fluent-bit
       containers:
       - name: fluent-bit
         image: {{ index .Values.global.images "fluent-bit" }}
@@ -42,8 +54,22 @@ spec:
             memory: 150Mi
         ports:
         - name: metrics
-          containerPort: 2020
+          containerPort: {{ .Values.ports.metrics }}
           protocol: TCP
+        - name: metrics-plugin
+          containerPort: {{ .Values.ports.outputPluginMetrics }}
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /api/v1/metrics/prometheus
+            port: 2020
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 2020
+          initialDelaySeconds: 90
+          periodSeconds: 10
         volumeMounts:
         - name: config
           mountPath: /fluent-bit/etc
@@ -52,6 +78,8 @@ spec:
         - name: varlibdockercontainers
           mountPath: /var/lib/docker/containers
           readOnly: true
+        - name: plugins
+          mountPath: /fluent-bit/plugins
       serviceAccount: fluent-bit
       serviceAccountName: fluent-bit
       automountServiceAccountToken: true
@@ -69,3 +97,5 @@ spec:
       - name: varlibdockercontainers
         hostPath:
           path: /var/lib/docker/containers
+      - name: plugins
+        emptyDir: {}

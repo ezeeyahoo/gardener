@@ -20,11 +20,11 @@ images:
 - name: etcd-druid
   sourceRepository: github.com/gardener/etcd-druid
   repository: eu.gcr.io/gardener-project/gardener/etcd-druid
-  tag: "v0.3.0"
+  tag: "v0.4.1"
 - name: gardener-resource-manager
   sourceRepository: github.com/gardener/gardener-resource-manager
   repository: eu.gcr.io/gardener-project/gardener/gardener-resource-manager
-  tag: "v0.17.0"
+  tag: "v0.20.0"
 - name: dependency-watchdog
   sourceRepository: github.com/gardener/dependency-watchdog
   repository: eu.gcr.io/gardener-project/gardener/dependency-watchdog
@@ -99,7 +99,7 @@ images:
 - name: prometheus
   sourceRepository: github.com/prometheus/prometheus
   repository: quay.io/prometheus/prometheus
-  tag: v2.20.1
+  tag: v2.22.2
 - name: configmap-reloader
   sourceRepository: github.com/jimmidyson/configmap-reload
   repository: quay.io/coreos/configmap-reload
@@ -111,11 +111,11 @@ images:
 - name: node-exporter
   sourceRepository: github.com/prometheus/node_exporter
   repository: quay.io/prometheus/node-exporter
-  tag: v0.18.1
+  tag: v1.0.1
 - name: grafana
   sourceRepository: github.com/grafana/grafana
   repository: grafana/grafana
-  tag: "7.0.3"
+  tag: "7.2.1"
 - name: blackbox-exporter
   sourceRepository: github.com/prometheus/blackbox_exporter
   repository: quay.io/prometheus/blackbox-exporter
@@ -123,7 +123,7 @@ images:
 - name: metrics-server
   sourceRepository: github.com/kubernetes-incubator/metrics-server
   repository: k8s.gcr.io/metrics-server/metrics-server
-  tag: v0.3.7
+  tag: v0.4.1
   targetVersion: ">= 1.11"
 - name: metrics-server
   sourceRepository: github.com/kubernetes-incubator/metrics-server
@@ -150,8 +150,8 @@ images:
   tag: "1.15.13"
 - name: node-problem-detector
   sourceRepository: github.com/kubernetes/node-problem-detector
-  repository: k8s.gcr.io/node-problem-detector
-  tag: "v0.8.2"
+  repository: k8s.gcr.io/node-problem-detector/node-problem-detector
+  tag: "v0.8.5"
 
 # Shoot optional addons
 - name: kubernetes-dashboard
@@ -198,9 +198,13 @@ images:
 
 # Logging
 - name: fluent-bit
+  sourceRepository: github.com/fluent/fluent-bit
+  repository: fluent/fluent-bit
+  tag: "1.6.4"
+- name: fluent-bit-plugin-installer
   sourceRepository: github.com/gardener/logging
   repository: eu.gcr.io/gardener-project/gardener/fluent-bit-to-loki
-  tag: "v0.26.0"
+  tag: "v0.32.0"
 - name: loki
   sourceRepository: github.com/grafana/loki
   repository: grafana/loki
@@ -210,15 +214,15 @@ images:
 - name: vpa-admission-controller
   sourceRepository: github.com/kubernetes/autoscaler
   repository: k8s.gcr.io/autoscaling/vpa-admission-controller
-  tag: "0.8.0"
+  tag: "0.9.0"
 - name: vpa-recommender
   sourceRepository: github.com/kubernetes/autoscaler
   repository: k8s.gcr.io/autoscaling/vpa-recommender
-  tag: "0.8.0"
+  tag: "0.9.0"
 - name: vpa-updater
   sourceRepository: github.com/kubernetes/autoscaler
   repository: k8s.gcr.io/autoscaling/vpa-updater
-  tag: "0.8.0"
+  tag: "0.9.0"
 - name: vpa-exporter
   sourceRepository: github.com/gardener/vpa-exporter
   repository: eu.gcr.io/gardener-project/gardener/vpa-exporter
@@ -234,18 +238,22 @@ images:
 - name: istio-proxy
   sourceRepository: github.com/istio/istio
   repository: docker.io/istio/proxyv2
-  tag: "1.7.2"
+  tag: "1.8.0"
 - name: istio-istiod
   sourceRepository: github.com/istio/istio
   repository: docker.io/istio/pilot
-  tag: "1.7.2"
+  tag: "1.8.0"
 
 # API Server SNI
 - name: apiserver-proxy
-  sourceRepository: github.com/nginxinc/docker-nginx
-  repository: nginx
-  tag: "1.17.8"
+  sourceRepository: github.com/envoyproxy/envoy
+  repository: envoyproxy/envoy
+  tag: "v1.16.0"
 - name: apiserver-proxy-sidecar
   sourceRepository: github.com/gardener/apiserver-proxy
   repository: eu.gcr.io/gardener-project/gardener/apiserver-proxy
   tag: "v0.1.0"
+- name: apiserver-proxy-pod-webhook
+  sourceRepository: github.com/gardener/apiserver-proxy
+  repository: eu.gcr.io/gardener-project/gardener/apiserver-proxy-pod-webhook
+  tag: "v0.2.0"

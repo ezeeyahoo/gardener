@@ -21,6 +21,7 @@ import (
 	"time"
 
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	gardencorev1beta1helper "github.com/gardener/gardener/pkg/apis/core/v1beta1/helper"
 	gardencoreinformers "github.com/gardener/gardener/pkg/client/core/informers/externalversions"
 	gardencorelisters "github.com/gardener/gardener/pkg/client/core/listers/core/v1beta1"
 	"github.com/gardener/gardener/pkg/client/kubernetes"
@@ -57,6 +58,7 @@ type Controller struct {
 	recorder                      record.EventRecorder
 	secrets                       map[string]*corev1.Secret
 	imageVector                   imagevector.ImageVector
+	shootReconciliationDueTracker *reconciliationDueTracker
 
 	controllerInstallationLister gardencorelisters.ControllerInstallationLister
 	seedLister                   gardencorelisters.SeedLister
@@ -107,6 +109,7 @@ func NewShootController(clientMap clientmap.ClientMap, k8sGardenCoreInformers ga
 		recorder:                      recorder,
 		secrets:                       secrets,
 		imageVector:                   imageVector,
+		shootReconciliationDueTracker: newReconciliationDueTracker(),
 
 		seedLister:                   seedLister,
 		shootLister:                  shootLister,
@@ -124,7 +127,9 @@ func NewShootController(clientMap clientmap.ClientMap, k8sGardenCoreInformers ga
 	shootInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: controllerutils.ShootFilterFunc(confighelper.SeedNameFromSeedConfig(config.SeedConfig), seedLister, config.SeedSelector),
 		Handler: cache.ResourceEventHandlerFuncs{
-			AddFunc:    shootController.shootAdd,
+			AddFunc: func(obj interface{}) {
+				shootController.shootAdd(obj, false)
+			},
 			UpdateFunc: shootController.shootUpdate,
 			DeleteFunc: shootController.shootDelete,
 		},
@@ -133,7 +138,8 @@ func NewShootController(clientMap clientmap.ClientMap, k8sGardenCoreInformers ga
 	shootInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: controllerutils.ShootFilterFunc(confighelper.SeedNameFromSeedConfig(config.SeedConfig), seedLister, config.SeedSelector),
 		Handler: cache.ResourceEventHandlerFuncs{
-			AddFunc: shootController.shootCareAdd,
+			AddFunc:    shootController.shootCareAdd,
+			UpdateFunc: shootController.shootCareUpdate,
 		},
 	})
 
@@ -148,7 +154,7 @@ func NewShootController(clientMap clientmap.ClientMap, k8sGardenCoreInformers ga
 	shootInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: controllerutils.ShootFilterFunc(confighelper.SeedNameFromSeedConfig(config.SeedConfig), seedLister, config.SeedSelector),
 		Handler: cache.ResourceEventHandlerFuncs{
-			AddFunc:    shootController.seedRegistrationAdd,
+			AddFunc:    func(obj interface{}) { shootController.seedRegistrationAdd(obj, false) },
 			UpdateFunc: shootController.seedRegistrationUpdate,
 		},
 	})
@@ -273,4 +279,9 @@ func (c *Controller) newProgressReporter(reporterFn flow.ProgressReporterFn) flo
 		return flow.NewDelayingProgressReporter(reporterFn, c.config.Controllers.Shoot.ProgressReportPeriod.Duration)
 	}
 	return flow.NewImmediateProgressReporter(reporterFn)
+}
+
+func shootIsSeed(shoot *gardencorev1beta1.Shoot) bool {
+	shootedSeed, err := gardencorev1beta1helper.ReadShootedSeed(shoot)
+	return err == nil && shootedSeed != nil
 }

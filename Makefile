@@ -16,6 +16,7 @@ REGISTRY                            := eu.gcr.io/gardener-project/gardener
 APISERVER_IMAGE_REPOSITORY          := $(REGISTRY)/apiserver
 CONTROLLER_MANAGER_IMAGE_REPOSITORY := $(REGISTRY)/controller-manager
 SCHEDULER_IMAGE_REPOSITORY          := $(REGISTRY)/scheduler
+ADMISSION_IMAGE_REPOSITORY          := $(REGISTRY)/admission-controller
 SEED_ADMISSION_IMAGE_REPOSITORY     := $(REGISTRY)/seed-admission-controller
 GARDENLET_IMAGE_REPOSITORY          := $(REGISTRY)/gardenlet
 PUSH_LATEST_TAG                     := false
@@ -55,7 +56,7 @@ local-garden-up:
 	@./hack/local-development/local-garden/run-gardener-etcd $(LOCAL_GARDEN_LABEL)
 
 	# Applying proxy RBAC for the extension controller
-	# After this step, you can start using the cluster at hack/local-garden/kubeconfigs/admin.conf
+	# After this step, you can start using the cluster at KUBECONFIG=hack/local-development/local-garden/kubeconfigs/default-admin.conf
 	@./hack/local-development/local-garden/apply-rbac-garden-ns
 
 	# Now you can start using the cluster at with `export KUBECONFIG=hack/local-development/local-garden/kubeconfigs/default-admin.conf`
@@ -193,4 +194,4 @@ test-prometheus:
 verify: check format test
 
 .PHONY: verify-extended
-verify-extended: install-requirements check format test-cov test-cov-clean
+verify-extended: install-requirements check-generate check format test-cov test-cov-clean

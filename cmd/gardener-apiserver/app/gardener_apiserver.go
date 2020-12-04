@@ -27,7 +27,6 @@ import (
 	settingsv1alpha1 "github.com/gardener/gardener/pkg/apis/settings/v1alpha1"
 	"github.com/gardener/gardener/pkg/apiserver"
 	admissioninitializer "github.com/gardener/gardener/pkg/apiserver/admission/initializer"
-	"github.com/gardener/gardener/pkg/apiserver/features"
 	"github.com/gardener/gardener/pkg/apiserver/storage"
 	gardencoreclientset "github.com/gardener/gardener/pkg/client/core/clientset/internalversion"
 	gardenversionedcoreclientset "github.com/gardener/gardener/pkg/client/core/clientset/versioned"
@@ -38,6 +37,7 @@ import (
 	settingsinformer "github.com/gardener/gardener/pkg/client/settings/informers/externalversions"
 	"github.com/gardener/gardener/pkg/openapi"
 	"github.com/gardener/gardener/pkg/version"
+	"github.com/gardener/gardener/pkg/version/verflag"
 	controllerregistrationresources "github.com/gardener/gardener/plugin/pkg/controllerregistration/resources"
 	"github.com/gardener/gardener/plugin/pkg/global/customverbauthorizer"
 	"github.com/gardener/gardener/plugin/pkg/global/deletionconfirmation"
@@ -52,6 +52,8 @@ import (
 	shoottolerationrestriction "github.com/gardener/gardener/plugin/pkg/shoot/tolerationrestriction"
 	shootvalidator "github.com/gardener/gardener/plugin/pkg/shoot/validator"
 	shootstatedeletionvalidator "github.com/gardener/gardener/plugin/pkg/shootstate/validator"
+	"github.com/gardener/gardener/third_party/forked/kubernetes/pkg/quota/v1/generic"
+	"github.com/gardener/gardener/third_party/forked/kubernetes/plugin/pkg/admission/resourcequota"
 
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
@@ -91,6 +93,8 @@ the main components of a Kubernetes cluster (etcd, API server, controller manage
 These so-called control plane components are hosted in Kubernetes clusters themselves
 (which are called Seed clusters).`,
 		RunE: func(c *cobra.Command, args []string) error {
+			verflag.PrintAndExitIfRequested()
+
 			if err := opts.complete(); err != nil {
 				return err
 			}
@@ -102,8 +106,9 @@ These so-called control plane components are hosted in Kubernetes clusters thems
 	}
 
 	flags := cmd.Flags()
-	utilfeature.DefaultMutableFeatureGate.AddFlag(flags)
+	verflag.AddFlags(flags)
 	opts.Recommended.AddFlags(flags)
+	opts.ServerRunOptions.AddUniversalFlags(flags)
 	opts.ExtraOptions.AddFlags(flags)
 	return cmd
 }
@@ -111,6 +116,7 @@ These so-called control plane components are hosted in Kubernetes clusters thems
 // Options has all the context and parameters needed to run a Gardener API server.
 type Options struct {
 	Recommended                 *genericoptions.RecommendedOptions
+	ServerRunOptions            *genericoptions.ServerRunOptions
 	ExtraOptions                *apiserver.ExtraOptions
 	CoreInformerFactory         gardencoreinformers.SharedInformerFactory
 	ExternalCoreInformerFactory gardenexternalcoreinformers.SharedInformerFactory
@@ -131,9 +137,10 @@ func NewOptions(out, errOut io.Writer) *Options {
 			),
 			genericoptions.NewProcessInfo("gardener-apiserver", "garden"),
 		),
-		ExtraOptions: &apiserver.ExtraOptions{},
-		StdOut:       out,
-		StdErr:       errOut,
+		ServerRunOptions: genericoptions.NewServerRunOptions(),
+		ExtraOptions:     &apiserver.ExtraOptions{},
+		StdOut:           out,
+		StdErr:           errOut,
 	}
 	o.Recommended.Etcd.StorageConfig.EncodeVersioner = runtime.NewMultiGroupVersioner(
 		gardencorev1beta1.SchemeGroupVersion,
@@ -145,8 +152,9 @@ func NewOptions(out, errOut io.Writer) *Options {
 
 // validate validates all the required options.
 func (o Options) validate(args []string) error {
-	errs := []error{}
+	var errs []error
 	errs = append(errs, o.Recommended.Validate()...)
+	errs = append(errs, o.ServerRunOptions.Validate()...)
 	errs = append(errs, o.ExtraOptions.Validate()...)
 
 	// Require server certificate specification
@@ -174,6 +182,7 @@ func (o *Options) complete() error {
 	clusteropenidconnectpreset.Register(o.Recommended.Admission.Plugins)
 	shootstatedeletionvalidator.Register(o.Recommended.Admission.Plugins)
 	customverbauthorizer.Register(o.Recommended.Admission.Plugins)
+	resourcequota.Register(o.Recommended.Admission.Plugins)
 
 	allOrderedPlugins := []string{
 		resourcereferencemanager.PluginName,
@@ -190,6 +199,9 @@ func (o *Options) complete() error {
 		clusteropenidconnectpreset.PluginName,
 		shootstatedeletionvalidator.PluginName,
 		customverbauthorizer.PluginName,
+		// This plugin must remain the last one in the list since it updates the quota usage
+		// which can only happen reliably if previous plugins permitted the request.
+		resourcequota.PluginName,
 	}
 	o.Recommended.Admission.RecommendedPluginOrder = append(o.Recommended.Admission.RecommendedPluginOrder, allOrderedPlugins...)
 
@@ -241,6 +253,10 @@ func (o *Options) config(kubeAPIServerConfig *rest.Config, kubeClient *kubernete
 				kubeClient,
 				dynamicClient,
 				gardenerAPIServerConfig.Authorization.Authorizer,
+				// ResourceQuota admission plugin configuration is injected via `ExtraAdmissionInitializers`.
+				// Ref implementation of Kube-Apiserver:
+				// https://github.com/kubernetes/kubernetes/blob/53b2973440a29e1682df6ba687cebc6764bba44c/pkg/kubeapiserver/admission/config.go#L70
+				generic.NewConfiguration(nil, nil),
 			),
 		}, nil
 	}
@@ -345,6 +361,9 @@ func (o *Options) ApplyTo(config *apiserver.Config) error {
 	gardenerAPIServerConfig.OpenAPIConfig.Info.Version = gardenerVersion.GitVersion
 	gardenerAPIServerConfig.Version = &gardenerVersion
 
+	if err := o.ServerRunOptions.ApplyTo(&gardenerAPIServerConfig.Config); err != nil {
+		return err
+	}
 	if err := o.Recommended.SecureServing.ApplyTo(&gardenerAPIServerConfig.SecureServing, &gardenerAPIServerConfig.LoopbackClientConfig); err != nil {
 		return err
 	}
@@ -365,7 +384,7 @@ func (o *Options) ApplyTo(config *apiserver.Config) error {
 	}
 	if initializers, err := o.Recommended.ExtraAdmissionInitializers(gardenerAPIServerConfig); err != nil {
 		return err
-	} else if err := o.Recommended.Admission.ApplyTo(&gardenerAPIServerConfig.Config, gardenerAPIServerConfig.SharedInformerFactory, gardenerAPIServerConfig.ClientConfig, features.FeatureGate, initializers...); err != nil {
+	} else if err := o.Recommended.Admission.ApplyTo(&gardenerAPIServerConfig.Config, gardenerAPIServerConfig.SharedInformerFactory, gardenerAPIServerConfig.ClientConfig, utilfeature.DefaultFeatureGate, initializers...); err != nil {
 		return err
 	}
 

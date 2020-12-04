@@ -45,6 +45,9 @@ type GardenletConfiguration struct {
 	// Controllers defines the configuration of the controllers.
 	// +optional
 	Controllers *GardenletControllerConfiguration `json:"controllers,omitempty"`
+	// Resources defines the total capacity for seed resources and the amount reserved for use by Gardener.
+	// +optional
+	Resources *ResourcesConfiguration `json:"resources,omitempty"`
 	// LeaderElection defines the configuration of leader election client.
 	// +optional
 	LeaderElection *LeaderElectionConfiguration `json:"leaderElection,omitempty"`
@@ -76,6 +79,10 @@ type GardenletConfiguration struct {
 	// by the Gardenlet in the seed clusters.
 	// +optional
 	Logging *Logging `json:"logging,omitempty"`
+	// SNI contains an optional configuration for the APIServerSNI feature used
+	// by the Gardenlet in the seed clusters.
+	// +optional
+	SNI *SNI `json:"sni,omitempty"`
 }
 
 // GardenClientConnection specifies the kubeconfig file and the client connection settings
@@ -143,6 +150,9 @@ type GardenletControllerConfiguration struct {
 	// ShootStateSync defines the configuration of the ShootStateController controller
 	// +optional
 	ShootStateSync *ShootStateSyncControllerConfiguration `json:"shootStateSync,omitempty"`
+	// ShootedSeedRegistration the configuration of the shooted seed registration controller.
+	// +optional
+	ShootedSeedRegistration *ShootedSeedRegistrationControllerConfiguration `json:"shootedSeedRegistration,omitempty"`
 	// SeedAPIServerNetworkPolicy defines the configuration of the SeedAPIServerNetworkPolicy controller
 	// +optional
 	SeedAPIServerNetworkPolicy *SeedAPIServerNetworkPolicyControllerConfiguration `json:"seedAPIServerNetworkPolicy,omitempty"`
@@ -258,6 +268,10 @@ type ShootControllerConfiguration struct {
 	// SyncPeriod is the duration how often the existing resources are reconciled.
 	// +optional
 	SyncPeriod *metav1.Duration `json:"syncPeriod,omitempty"`
+	// DNSEntryTTLSeconds is the TTL in seconds that is being used for DNS entries when reconciling shoots.
+	// Default: 120s
+	// +optional
+	DNSEntryTTLSeconds *int64 `json:"dnsEntryTTLSeconds,omitempty"`
 }
 
 // ShootCareControllerConfiguration defines the configuration of the ShootCare
@@ -284,12 +298,32 @@ type ShootCareControllerConfiguration struct {
 	ConditionThresholds []ConditionThreshold `json:"conditionThresholds,omitempty"`
 }
 
+// ShootedSeedRegistrationControllerConfiguration defines the configuration of the shooted seed registration controller.
+type ShootedSeedRegistrationControllerConfiguration struct {
+	// SyncJitterPeriod is a jitter duration for the reconciler sync that can be used to distribute the syncs randomly.
+	// If its value is greater than 0 then the shooted seeds will not be enqueued immediately but only after a random
+	// duration between 0 and the configured value. It is defaulted to 5m.
+	// +optional
+	SyncJitterPeriod *metav1.Duration `json:"syncJitterPeriod,omitempty"`
+}
+
 // ConditionThreshold defines the duration how long a flappy condition stays in progressing state.
 type ConditionThreshold struct {
 	// Type is the type of the condition to define the threshold for.
 	Type string `json:"type"`
 	// Duration is the duration how long the condition can stay in the progressing state.
 	Duration metav1.Duration `json:"duration"`
+}
+
+// ResourcesConfiguration defines the total capacity for seed resources and the amount reserved for use by Gardener.
+type ResourcesConfiguration struct {
+	// Capacity defines the total resources of a seed.
+	// +optional
+	Capacity corev1.ResourceList `json:"capacity,omitempty"`
+	// Reserved defines the resources of a seed that are reserved for use by Gardener.
+	// Defaults to 0.
+	// +optional
+	Reserved corev1.ResourceList `json:"reserved,omitempty"`
 }
 
 // LeaderElectionConfiguration defines the configuration of leader election
@@ -364,6 +398,30 @@ type TLSServer struct {
 	ServerKeyPath string `json:"serverKeyPath"`
 }
 
+// SNI contains an optional configuration for the APIServerSNI feature used
+// by the Gardenlet in the seed clusters.
+type SNI struct {
+	// Ingress is the ingressgateway configuration.
+	// +optional
+	Ingress *SNIIngress `json:"ingress,omitempty"`
+}
+
+// SNIIngress contains configuration of the ingressgateway.
+type SNIIngress struct {
+	// ServiceName is the name of the ingressgateway Service.
+	// Defaults to "istio-ingressgateway".
+	// +optional
+	ServiceName *string `json:"serviceName,omitempty"`
+	// Namespace is the namespace in which the ingressgateway is deployed in.
+	// Defaults to "istio-ingress".
+	// +optional
+	Namespace *string `json:"namespace,omitempty"`
+	// Labels of the ingressgateway
+	// Defaults to "istio: ingressgateway".
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+}
+
 const (
 	// GardenletDefaultLockObjectNamespace is the default lock namespace for leader election.
 	GardenletDefaultLockObjectNamespace = "garden"
@@ -395,9 +453,13 @@ const (
 
 	// DefaultControllerConcurrentSyncs is a default value for concurrent syncs for controllers.
 	DefaultControllerConcurrentSyncs = 20
+
+	// DefaultSNIIngresNamespace is the default sni ingress namespace.
+	DefaultSNIIngresNamespace = "istio-ingress"
+
+	// DefaultSNIIngresServiceName is the default sni ingress service name.
+	DefaultSNIIngresServiceName = "istio-ingressgateway"
 )
 
-var (
-	// DefaultControllerSyncPeriod is a default value for sync period for controllers.
-	DefaultControllerSyncPeriod = metav1.Duration{Duration: time.Minute}
-)
+// DefaultControllerSyncPeriod is a default value for sync period for controllers.
+var DefaultControllerSyncPeriod = metav1.Duration{Duration: time.Minute}

@@ -4,6 +4,7 @@ metadata:
   name: kube-apiserver
   namespace: {{ .Release.Namespace }}
   labels:
+    gardener.cloud/role: controlplane
     garden.sapcloud.io/role: controlplane
     app: kubernetes
     role: apiserver
@@ -66,7 +67,7 @@ spec:
                     operator: In
                     values:
                     - apiserver
-      priorityClassName: gardener-shoot-controlplane
+      priorityClassName: {{ .Values.priorityClassName }}
       {{- if not .Values.konnectivityTunnel.enabled }}
       initContainers:
       - name: set-iptable-rules
@@ -135,6 +136,12 @@ spec:
         {{- include "kube-apiserver.oidcConfig" . | indent 8 }}
         {{- if semverCompare ">= 1.16" .Values.kubernetesVersion }}
         - --livez-grace-period=1m
+        {{- end }}
+        {{- if .Values.maxNonMutatingRequestsInflight }}
+        - --max-requests-inflight={{ .Values.maxNonMutatingRequestsInflight }}
+        {{- end }}
+        {{- if .Values.maxMutatingRequestsInflight }}
+        - --max-mutating-requests-inflight={{ .Values.maxMutatingRequestsInflight }}
         {{- end }}
         - --profiling=false
         - --proxy-client-cert-file=/srv/kubernetes/aggregator/kube-aggregator.crt
@@ -295,6 +302,20 @@ spec:
           readOnly: true
           {{- end }}
         {{- end }}
+      {{- if .Values.sni.podMutatorEnabled }}
+      - name: apiserver-proxy-pod-mutator
+        image: {{ index .Values.images "apiserver-proxy-pod-webhook" }}
+        args:
+        - --apiserver-fqdn={{ .Values.sni.apiserverFQDN }}
+        - --host=localhost
+        - --cert-dir=/srv/kubernetes/apiserver
+        - --cert-name=kube-apiserver.crt
+        - --key-name=kube-apiserver.key
+        - --port=9443
+        volumeMounts:
+        - name: kube-apiserver
+          mountPath: /srv/kubernetes/apiserver
+      {{- end }}
       {{- if .Values.konnectivityTunnel.enabled }}
       - name: konnectivity-server
         image: {{ index .Values.images "konnectivity-server" }}
@@ -314,13 +335,25 @@ spec:
         - --server-port={{ .Values.konnectivityTunnel.serverPort }}
         - --agent-port={{ .Values.konnectivityTunnel.agentPort }}
         - --admin-port={{ .Values.konnectivityTunnel.adminPort }}
+        - --health-port={{ .Values.konnectivityTunnel.healthPort }}
+        - --delete-existing-uds-file=true
         resources:
 {{ toYaml .Values.konnectivityTunnelResources | indent 10 }}
+        livenessProbe:
+          httpGet:
+            scheme: HTTP
+            port: {{ .Values.konnectivityTunnel.healthPort }}
+            path: /healthz
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 60
         ports:
           - name: agentport
             containerPort: {{ .Values.konnectivityTunnel.agentPort }}
           - name: adminport
             containerPort: {{ .Values.konnectivityTunnel.adminPort }}
+          - name: healthport
+            containerPort: {{ .Values.konnectivityTunnel.healthPort }}
         volumeMounts:
           - name: konnectivity-server-certs
             mountPath: /certs/konnectivity-server

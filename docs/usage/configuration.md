@@ -12,16 +12,22 @@ This document describes the
 ## Configuration and Usage of Gardener as Operator/Administrator
 
 When we use the terms "operator/administrator" we refer to both the people deploying and operating Gardener.
-Gardener consists out of four components:
+Gardener consists of the following components:
 
 1. `gardener-apiserver`, a Kubernetes-native API extension that serves custom resources in the Kubernetes-style (like `Seed`s and `Shoot`s), and a component that contains multiple admission plugins.
+1. `gardener-admission-controller`, an HTTP(S) server with several handlers to be used in a [ValidatingWebhookConfiguration](../../charts/gardener/controlplane/charts/application/templates/validatingwebhook-admission-controller.yaml).
 1. `gardener-controller-manager`, a component consisting out of multiple controllers that implement reconciliation and deletion flows for some of the custom resources (e.g., it contains the logic for maintaining `Shoot`s, reconciling `Plant`s, etc.).
 1. `gardener-scheduler`, a component that assigns newly created `Shoot` clusters to appropriate `Seed` clusters.
 1. `gardenlet`, a component running in seed clusters and consisting out of multiple controllers that implement reconciliation and deletion flows for some of the custom resources (e.g., it contains the logic for reconciliation and deletion of `Shoot`s).
 
 Each of these components have various configuration options.
 The `gardener-apiserver` uses the standard API server library maintained by the Kubernetes community, and as such it mainly supports command line flags.
-The two other components are using so-called componentconfig files that describe their configuration in a Kubernetes-style versioned object.
+Other components use so-called componentconfig files that describe their configuration in a Kubernetes-style versioned object.
+
+### Configuration file for Gardener admission controller
+
+The Gardener admission controller does only support one command line flag which should be a path to a valid admission-controller configuration file.
+Please take a look at [this](../../example/20-componentconfig-gardener-admission-controller.yaml) example configuration.
 
 ### Configuration file for Gardener controller manager
 
@@ -55,7 +61,7 @@ When the `gardenlet` starts it scans the `garden` namespace of the garden cluste
   * Not every end-user/stakeholder/customer has its own domain, however, Gardener needs to create a DNS record for every shoot cluster.
   * As landscape operator you might want to define a default domain owned and controlled by you that is used for all shoot clusters that don't specify their own domain.
 
-:warning: Please note that the mentioned domain secrets are only needed if you have at least one seed cluster that is not tainted with `seed.gardener.cloud/disable-dns`.
+:warning: Please note that the mentioned domain secrets are only needed if you have at least one seed cluster that is not specifing `.spec.settings.shootDNS.enabled=false`.
 Seeds with this taint don't create any DNS records for shoots scheduled on it, hence, if you only have such seeds, you don't need to create the domain secrets.
 
 * **Alerting secrets** (optional), contain the alerting configuration and credentials for the [AlertManager](https://prometheus.io/docs/alerting/alertmanager/) to send email alerts. It is also possible to configure the monitoring stack to send alerts to an AlertManager not deployed by Gardener to handle alerting. Please see [this](../../example/10-secret-alerting.yaml) for an example.

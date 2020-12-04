@@ -16,9 +16,11 @@ package shoot
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
+	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	gardencoreinformers "github.com/gardener/gardener/pkg/client/core/informers/externalversions"
 	gardencorelisters "github.com/gardener/gardener/pkg/client/core/listers/core/v1beta1"
 	"github.com/gardener/gardener/pkg/client/kubernetes/clientmap"
@@ -124,29 +126,37 @@ func NewShootController(clientMap clientmap.ClientMap, k8sGardenCoreInformers ga
 		DeleteFunc: shootController.shootHibernationDelete,
 	})
 
-	shootInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    shootController.shootReferenceAdd,
-		UpdateFunc: shootController.shootReferenceUpdate,
-	})
-
 	configMapInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    shootController.configMapAdd,
 		UpdateFunc: shootController.configMapUpdate,
 	})
-
-	shootController.hasSyncedFuncs = []cache.InformerSynced{
-		shootInformer.Informer().HasSynced,
-		gardenCoreV1beta1Informer.Quotas().Informer().HasSynced,
-		configMapInformer.Informer().HasSynced,
-	}
 
 	gardenClient, err := clientMap.GetClient(context.TODO(), keys.ForGarden())
 	if err != nil {
 		return nil, err
 	}
 
-	secretLister := func(ctx context.Context, secretList *corev1.SecretList, opts ...client.ListOption) error {
+	runtimeShootInformer, err := gardenClient.Cache().GetInformer(context.TODO(), &gardencorev1beta1.Shoot{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Shoot Informer: %w", err)
+	}
+	runtimeShootInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    shootController.shootReferenceAdd,
+		UpdateFunc: shootController.shootReferenceUpdate,
+	})
+
+	shootController.hasSyncedFuncs = []cache.InformerSynced{
+		shootInformer.Informer().HasSynced,
+		runtimeShootInformer.HasSynced,
+		gardenCoreV1beta1Informer.Quotas().Informer().HasSynced,
+		configMapInformer.Informer().HasSynced,
+	}
+
+	runtimeSecretLister := func(ctx context.Context, secretList *corev1.SecretList, opts ...client.ListOption) error {
 		return gardenClient.Cache().List(ctx, secretList, opts...)
+	}
+	runtimeConfigMapLister := func(ctx context.Context, configMapList *corev1.ConfigMapList, opts ...client.ListOption) error {
+		return gardenClient.Cache().List(ctx, configMapList, opts...)
 	}
 
 	// If cache is not enabled, set up a dedicated informer which only considers objects which are not gardener managed.
@@ -158,7 +168,7 @@ func NewShootController(clientMap clientmap.ClientMap, k8sGardenCoreInformers ga
 			}))
 		secretInformer := factory.Core().V1().Secrets()
 
-		secretLister = func(ctx context.Context, secretList *corev1.SecretList, opts ...client.ListOption) error {
+		runtimeSecretLister = func(ctx context.Context, secretList *corev1.SecretList, opts ...client.ListOption) error {
 			listOpts := &client.ListOptions{}
 			for _, opt := range opts {
 				opt.ApplyToList(listOpts)
@@ -179,7 +189,7 @@ func NewShootController(clientMap clientmap.ClientMap, k8sGardenCoreInformers ga
 		shootController.startFuncs = append(shootController.startFuncs, factory.Start)
 	}
 
-	shootController.shootRefReconciler = NewShootReferenceReconciler(logger.Logger, clientMap, secretLister)
+	shootController.shootRefReconciler = NewShootReferenceReconciler(logger.Logger, clientMap, runtimeSecretLister, runtimeConfigMapLister, config.Controllers.ShootReference)
 
 	return shootController, nil
 }
